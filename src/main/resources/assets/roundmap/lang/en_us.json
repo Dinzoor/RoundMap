@@ -2,5 +2,9 @@
   "key.category.roundmap.controls": "RoundMap",
   "key.roundmap.full_map": "Fullscreen map",
   "key.roundmap.waypoint": "Create waypoint",
-  "key.roundmap.settings": "RoundMap settings"
+  "key.roundmap.settings": "RoundMap settings",
+  "key.roundmap.toggle": "Toggle minimap",
+  "key.roundmap.zoom_in": "Enlarge minimap",
+  "key.roundmap.zoom_out": "Shrink minimap",
+  "key.roundmap.list": "Waypoint list"
 }
