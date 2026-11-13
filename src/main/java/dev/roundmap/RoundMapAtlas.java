@@ -35,6 +35,8 @@ final class RoundMapAtlas {
     private static final int RADIUS_CHUNKS = 10;
     static int readsPerTick = 8;
     static boolean detailed = true;
+    static boolean contours = true;
+    static boolean relief = true;
     private static final long SAVE_EVERY_NANOS = 60_000_000_000L;
     private static final ExecutorService IO = Executors.newSingleThreadExecutor(task -> {
         Thread t = new Thread(task, "RoundMap-atlas-io");
@@ -104,7 +106,12 @@ final class RoundMapAtlas {
         int north = heightAt(x, z - 1);
         if (west == Short.MIN_VALUE) west = h;
         if (north == Short.MIN_VALUE) north = h;
-        int shade = Math.max(-62, Math.min(62, (h - west) * 7 + (h - north) * 5));
+        int shade = relief ? Math.max(-62, Math.min(62,
+            (h - west) * 7 + (h - north) * 5)) : 0;
+        if (contours && (Math.floorDiv(h, 10) != Math.floorDiv(west, 10) ||
+                         Math.floorDiv(h, 10) != Math.floorDiv(north, 10))) {
+            shade = Math.max(-80, shade - 24);
+        }
         int red = Math.max(0, Math.min(255, ((color >> 16) & 255) + shade));
         int green = Math.max(0, Math.min(255, ((color >> 8) & 255) + shade));
         int blue = Math.max(0, Math.min(255, (color & 255) + shade));
