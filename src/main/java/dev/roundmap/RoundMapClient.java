@@ -7,6 +7,9 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.io.IOException;
 import java.util.Base64;
+import java.util.Properties;
+import java.io.InputStream;
+import java.io.OutputStream;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -40,6 +43,38 @@ public final class RoundMapClient implements ClientModInitializer {
     private static boolean lastM, lastB, lastO;
     private static boolean showMini = true, showLabels = true;
     private static int miniSize = 48, mapZoom = 3;
+    private static double miniX = -1, miniY = -1;
+    private static final Path POSITION_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-position.properties");
+
+    private static void loadPosition() {
+        if (!Files.isRegularFile(POSITION_FILE)) return;
+        Properties p = new Properties();
+        try (InputStream in = Files.newInputStream(POSITION_FILE)) {
+            p.load(in);
+            miniX = Double.parseDouble(p.getProperty("x", "-1"));
+            miniY = Double.parseDouble(p.getProperty("y", "-1"));
+            if (!Double.isFinite(miniX) || !Double.isFinite(miniY)) { miniX = -1; miniY = -1; }
+        } catch (IOException | IllegalArgumentException e) { System.err.println("[RoundMap] Cannot load position: " + e); }
+    }
+
+    private static void savePosition() {
+        Properties p = new Properties();
+        p.setProperty("x", Double.toString(miniX));
+        p.setProperty("y", Double.toString(miniY));
+        try {
+            Files.createDirectories(POSITION_FILE.getParent());
+            try (OutputStream out = Files.newOutputStream(POSITION_FILE)) { p.store(out, "RoundMap minimap center, normalized to screen"); }
+        } catch (IOException e) { System.err.println("[RoundMap] Cannot save position: " + e); }
+    }
+
+    private static int miniCenterX(int width) {
+        int r = Math.max(0, Math.min(miniSize + 12, width / 2));
+        return Math.max(r, Math.min(width - r, miniX < 0 ? width - miniSize - 12 : (int)Math.round(miniX * width)));
+    }
+    private static int miniCenterY(int height) {
+        int r = Math.max(0, Math.min(miniSize + 18, height / 2));
+        return Math.max(r, Math.min(height - r, miniY < 0 ? miniSize + 18 : (int)Math.round(miniY * height)));
+    }
     private record Marker(int x, int z, String dimension, String name) {}
 
     private static final Path WAYPOINT_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-waypoints.txt");
@@ -73,6 +108,7 @@ public final class RoundMapClient implements ClientModInitializer {
 
     @Override public void onInitializeClient() {
         loadMarkers();
+        loadPosition();
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
             if (screen instanceof net.minecraft.client.gui.screens.options.OptionsScreen) {
                 Screens.getButtons(screen).add(Button.builder(Component.literal("RoundMap settings"),
@@ -143,7 +179,10 @@ public final class RoundMapClient implements ClientModInitializer {
         }
         if (showMini && !mc.options.hideGui) sample(mc);
         if (!showMini || mc.options.hideGui) return;
-        int cx = g.guiWidth() - miniSize - 12, cy = miniSize + 18;
+        drawMini(g, mc, miniCenterX(g.guiWidth()), miniCenterY(g.guiHeight()));
+    }
+
+    private static void drawMini(GuiGraphics g, Minecraft mc, int cx, int cy) {
         // Draw horizontal color runs instead of one GPU rectangle per pixel.
         for (int y = -miniSize; y <= miniSize; y += 2) {
             int gy = HALF + y * HALF / miniSize;
@@ -285,8 +324,70 @@ public final class RoundMapClient implements ClientModInitializer {
                 miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48;
                 minecraft.setScreen(new OptionsScreen(parent));
             }).bounds(x, y + 50, 210, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Move minimap (drag)"), b ->
+                minecraft.setScreen(new PositionScreen(parent))).bounds(x, y + 80, 210, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Done"), b ->
-                returnToParent()).bounds(x, y + 85, 210, 20).build());
+                returnToParent()).bounds(x, y + 110, 210, 20).build());
+        }
+    }
+
+
+    private static final class PositionScreen extends Screen {
+        private final Screen returnScreen;
+        private final double originalX, originalY;
+        private int centerPx, centerPy;
+        private boolean dragging, wasDown;
+        private PositionScreen(Screen returnScreen) {
+            super(Component.literal("Move RoundMap minimap"));
+            this.returnScreen = returnScreen;
+            this.originalX = miniX;
+            this.originalY = miniY;
+        }
+        @Override protected void init() {
+            centerPx = miniCenterX(width);
+            centerPy = miniCenterY(height);
+            addRenderableWidget(Button.builder(Component.literal("Save position"), b -> {
+                miniX = centerPx / (double)Math.max(1, width);
+                miniY = centerPy / (double)Math.max(1, height);
+                savePosition();
+                minecraft.setScreen(returnScreen);
+            }).bounds(width / 2 - 155, height - 30, 100, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Reset"), b -> {
+                centerPx = Math.max(miniSize, width - miniSize - 12);
+                centerPy = miniSize + 18;
+                clamp();
+            }).bounds(width / 2 - 50, height - 30, 100, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> {
+                miniX = originalX; miniY = originalY;
+                minecraft.setScreen(returnScreen);
+            }).bounds(width / 2 + 55, height - 30, 100, 20).build());
+        }
+        private void clamp() {
+            int marginX = Math.min(miniSize + 12, width / 2);
+            int marginY = Math.min(miniSize + 18, height / 2);
+            centerPx = Math.max(marginX, Math.min(width - marginX, centerPx));
+            centerPy = Math.max(marginY, Math.min(height - marginY, centerPy));
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xC9202730);
+            boolean down = GLFW.glfwGetMouseButton(minecraft.getWindow().handle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
+            if (down && !wasDown && Math.abs(mouseX - centerPx) <= miniSize + 8
+                && Math.abs(mouseY - centerPy) <= miniSize + 8
+                && (mouseX-centerPx)*(mouseX-centerPx)+(mouseY-centerPy)*(mouseY-centerPy) <= (miniSize+8)*(miniSize+8)) {
+                dragging = true;
+            }
+            if (!down) dragging = false;
+            if (dragging) { centerPx = mouseX; centerPy = mouseY; clamp(); }
+            wasDown = down;
+            if (minecraft.player != null && minecraft.level != null)
+                drawMini(g, minecraft, centerPx, centerPy);
+            else {
+                g.fill(centerPx - miniSize, centerPy - miniSize, centerPx + miniSize, centerPy + miniSize, 0xFF425F77);
+                outline(g, centerPx, centerPy, miniSize);
+            }
+            g.drawCenteredString(font, "Drag the round minimap with left mouse button", width / 2, 15, -1);
+            g.drawCenteredString(font, "Save keeps the position after restarting Minecraft", width / 2, 29, 0xFFBBBBBB);
+            super.render(g, mouseX, mouseY, delta);
         }
     }
 
