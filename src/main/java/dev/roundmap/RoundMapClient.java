@@ -16,6 +16,10 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.minecraft.client.KeyMapping;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -40,7 +44,8 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final long SAMPLE_INTERVAL_NS = 100_000_000L;
     private static int lastPlayerX = Integer.MIN_VALUE, lastPlayerZ = Integer.MIN_VALUE;
     private static Object lastWorld;
-    private static boolean lastM, lastB, lastO;
+    private static KeyMapping mapKey, waypointKey, optionsKey;
+    private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
     private static boolean showMini = true, showLabels = true;
     private static int miniSize = 48, mapZoom = 3;
     private static double miniX = -1, miniY = -1;
@@ -107,6 +112,15 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     @Override public void onInitializeClient() {
+        mapKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.full_map", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, KEY_CATEGORY));
+        waypointKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.waypoint", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, KEY_CATEGORY));
+        optionsKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.settings", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_O, KEY_CATEGORY));
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (client.player == null || client.level == null || client.screen != null) return;
+            if (mapKey.consumeClick()) client.setScreen(new MapScreen());
+            else if (waypointKey.consumeClick()) client.setScreen(new NameScreen(client.player.getBlockX(), client.player.getBlockZ(), client.level.dimension().toString()));
+            else if (optionsKey.consumeClick()) client.setScreen(new OptionsScreen());
+        });
         loadMarkers();
         loadPosition();
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
@@ -159,17 +173,6 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void hud(GuiGraphics g) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
-        long window = mc.getWindow().handle();
-        boolean m = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_M) == GLFW.GLFW_PRESS;
-        boolean b = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_B) == GLFW.GLFW_PRESS;
-        boolean o = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_O) == GLFW.GLFW_PRESS;
-        if (mc.screen == null) {
-            if (m && !lastM) mc.setScreen(new MapScreen());
-            else if (b && !lastB) mc.setScreen(new NameScreen(mc.player.getBlockX(),
-                mc.player.getBlockZ(), mc.level.dimension().toString()));
-            else if (o && !lastO) mc.setScreen(new OptionsScreen());
-        }
-        lastM = m; lastB = b; lastO = o;
         int px = mc.player.getBlockX(), pz = mc.player.getBlockZ();
         if (lastWorld != mc.level || lastPlayerX == Integer.MIN_VALUE ||
             Math.abs(px - lastPlayerX) >= 24 || Math.abs(pz - lastPlayerZ) >= 24) {
@@ -239,8 +242,8 @@ public final class RoundMapClient implements ClientModInitializer {
 
     private static final class MapScreen extends Screen {
         private double panX, panZ, oldX, oldY;
-        private boolean wasDragging, lastClose, lastPlus, lastMinus;
-        private MapScreen() { super(Component.literal("RoundMap")); lastClose = true; }
+        private boolean wasDragging, lastPlus, lastMinus;
+        private MapScreen() { super(Component.literal("RoundMap")); }
         @Override protected void init() {
             addRenderableWidget(Button.builder(Component.literal("Settings"), b ->
                 minecraft.setScreen(new OptionsScreen())).bounds(width - 95, 8, 85, 20).build());
@@ -287,15 +290,16 @@ public final class RoundMapClient implements ClientModInitializer {
             g.drawCenteredString(font, "RoundMap | drag: pan | wheel or +/-: zoom | ESC: close", width / 2, 12, -1);
             g.drawCenteredString(font, "X " + targetX + "  Z " + targetZ, width / 2, height - 16, -1);
             super.render(g, mouseX, mouseY, delta);
-            boolean close = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_M) == GLFW.GLFW_PRESS;
-            if (close && !lastClose) minecraft.setScreen(null);
-            lastClose = close;
             boolean plus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_EQUAL) == GLFW.GLFW_PRESS;
             boolean minus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_MINUS) == GLFW.GLFW_PRESS;
             if (plus && !lastPlus && mapZoom < 8) mapZoom++;
             if (minus && !lastMinus && mapZoom > 1) mapZoom--;
             lastPlus = plus;
             lastMinus = minus;
+        }
+        @Override public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+            if (mapKey.matches(event.key(), event.scancode())) { minecraft.setScreen(null); return true; }
+            return super.keyPressed(event);
         }
         @Override public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
             if (vertical > 0) mapZoom = Math.min(8, mapZoom + 1);
