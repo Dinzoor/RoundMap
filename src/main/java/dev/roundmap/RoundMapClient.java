@@ -47,8 +47,8 @@ public final class RoundMapClient implements ClientModInitializer {
     private static KeyMapping mapKey, waypointKey, optionsKey, toggleKey, zoomInKey, zoomOutKey, listKey;
     private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
     private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true, showWorldMarkers = true;
-    private static int miniOpacity = 100;
-    private static boolean brightFog = true;
+    static int miniOpacity = 100;
+    static boolean brightFog = true;
     private static int miniSize = 48, mapZoom = 3;
     private static double miniZoom = 1.0;
     private static double miniX = -1, miniY = -1;
