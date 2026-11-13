@@ -44,9 +44,9 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final long SAMPLE_INTERVAL_NS = 100_000_000L;
     private static int lastPlayerX = Integer.MIN_VALUE, lastPlayerZ = Integer.MIN_VALUE;
     private static Object lastWorld;
-    private static KeyMapping mapKey, waypointKey, optionsKey;
+    private static KeyMapping mapKey, waypointKey, optionsKey, toggleKey, zoomInKey, zoomOutKey, listKey;
     private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
-    private static boolean showMini = true, showLabels = true;
+    private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true;
     private static int miniSize = 48, mapZoom = 3;
     private static double miniX = -1, miniY = -1;
     private static final Path POSITION_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-position.properties");
@@ -58,6 +58,12 @@ public final class RoundMapClient implements ClientModInitializer {
             p.load(in);
             miniX = Double.parseDouble(p.getProperty("x", "-1"));
             miniY = Double.parseDouble(p.getProperty("y", "-1"));
+            miniSize = Integer.parseInt(p.getProperty("size", "48"));
+            miniSize = Math.max(24, Math.min(120, miniSize));
+            showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
+            showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
+            showCompass = Boolean.parseBoolean(p.getProperty("compass", "true"));
+            showLabels = Boolean.parseBoolean(p.getProperty("labels", "true"));
             if (!Double.isFinite(miniX) || !Double.isFinite(miniY)) { miniX = -1; miniY = -1; }
         } catch (IOException | IllegalArgumentException e) { System.err.println("[RoundMap] Cannot load position: " + e); }
     }
@@ -66,6 +72,11 @@ public final class RoundMapClient implements ClientModInitializer {
         Properties p = new Properties();
         p.setProperty("x", Double.toString(miniX));
         p.setProperty("y", Double.toString(miniY));
+        p.setProperty("size", Integer.toString(miniSize));
+        p.setProperty("visible", Boolean.toString(showMini));
+        p.setProperty("coords", Boolean.toString(showCoords));
+        p.setProperty("compass", Boolean.toString(showCompass));
+        p.setProperty("labels", Boolean.toString(showLabels));
         try {
             Files.createDirectories(POSITION_FILE.getParent());
             try (OutputStream out = Files.newOutputStream(POSITION_FILE)) { p.store(out, "RoundMap minimap center, normalized to screen"); }
@@ -115,11 +126,19 @@ public final class RoundMapClient implements ClientModInitializer {
         mapKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.full_map", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, KEY_CATEGORY));
         waypointKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.waypoint", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, KEY_CATEGORY));
         optionsKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.settings", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_O, KEY_CATEGORY));
+        toggleKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.toggle", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
+        zoomInKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.zoom_in", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
+        zoomOutKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.zoom_out", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
+        listKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.list", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.level == null || client.screen != null) return;
             if (mapKey.consumeClick()) client.setScreen(new MapScreen());
             else if (waypointKey.consumeClick()) client.setScreen(new NameScreen(client.player.getBlockX(), client.player.getBlockZ(), client.level.dimension().toString()));
             else if (optionsKey.consumeClick()) client.setScreen(new OptionsScreen());
+            else if (listKey.consumeClick()) client.setScreen(new WaypointListScreen(null, 0));
+            else if (toggleKey.consumeClick()) { showMini = !showMini; savePosition(); }
+            else if (zoomInKey.consumeClick()) { miniSize = Math.min(120, miniSize + 8); savePosition(); }
+            else if (zoomOutKey.consumeClick()) { miniSize = Math.max(24, miniSize - 8); savePosition(); }
         });
         loadMarkers();
         loadPosition();
@@ -207,8 +226,8 @@ public final class RoundMapClient implements ClientModInitializer {
         outline(g, cx, cy, miniSize);
         drawMarkers(g, mc, cx, cy, miniSize / (float)HALF, miniSize, true);
         pointer(g, mc, cx, cy);
-        g.drawCenteredString(mc.font, "N", cx, cy - miniSize - 11, -1);
-        g.drawCenteredString(mc.font, "M: map  B: waypoint  O: options", cx, cy + miniSize + 8, -1);
+        if (showCompass) g.drawCenteredString(mc.font, "N", cx, cy - miniSize - 11, -1);
+        if (showCoords) g.drawCenteredString(mc.font, "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(), cx, cy + miniSize + 8, -1);
     }
 
     private static void drawMarkers(GuiGraphics g, Minecraft mc, int cx, int cy, float scale, int radius, boolean circle) {
@@ -244,6 +263,11 @@ public final class RoundMapClient implements ClientModInitializer {
         private double panX, panZ, oldX, oldY;
         private boolean wasDragging, lastPlus, lastMinus;
         private MapScreen() { super(Component.literal("RoundMap")); }
+        private MapScreen(int x, int z) {
+            this();
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player != null) { panX = x - mc.player.getBlockX(); panZ = z - mc.player.getBlockZ(); }
+        }
         @Override protected void init() {
             addRenderableWidget(Button.builder(Component.literal("Settings"), b ->
                 minecraft.setScreen(new OptionsScreen())).bounds(width - 95, 8, 85, 20).build());
@@ -336,20 +360,25 @@ public final class RoundMapClient implements ClientModInitializer {
             int w = Math.min(280, width - 24), x = (width - w) / 2;
             int y = Math.max(44, height / 2 - 66);
             if (tab == 0) {
-                addOption(x, y, w, "Мини-карта: " + (showMini ? "Вкл" : "Выкл"), () -> showMini = !showMini);
+                addOption(x, y, w, "Мини-карта: " + (showMini ? "Вкл" : "Выкл"), () -> { showMini = !showMini; savePosition(); });
                 addOption(x, y + 25, w, "Размер мини-карты: " + miniSize, () ->
-                    miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48);
+                    { miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48; savePosition(); });
+                addOption(x, y + 50, w, "Координаты: " + (showCoords ? "Вкл" : "Выкл"), () -> { showCoords = !showCoords; savePosition(); });
+                addOption(x, y + 75, w, "Компас: " + (showCompass ? "Вкл" : "Выкл"), () -> { showCompass = !showCompass; savePosition(); });
                 addRenderableWidget(Button.builder(Component.literal("Переместить мини-карту мышью"),
                     b -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))))
-                    .bounds(x, y + 50, w, 20).build());
+                    .bounds(x, y + 100, w, 20).build());
             } else if (tab == 3) {
                 addOption(x, y, w, "Названия точек: " + (showLabels ? "Вкл" : "Выкл"),
-                    () -> showLabels = !showLabels);
+                    () -> { showLabels = !showLabels; savePosition(); });
                 addRenderableWidget(Button.builder(Component.literal("Создать точку у игрока"), b -> {
                     if (minecraft.player != null && minecraft.level != null)
                         minecraft.setScreen(new NameScreen(minecraft.player.getBlockX(),
                             minecraft.player.getBlockZ(), minecraft.level.dimension().toString()));
                 }).bounds(x, y + 25, w, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Список точек"), b ->
+                    minecraft.setScreen(new WaypointListScreen(new OptionsScreen(parent, tab), 0)))
+                    .bounds(x, y + 50, w, 20).build());
             }
             addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
                 minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
@@ -358,6 +387,47 @@ public final class RoundMapClient implements ClientModInitializer {
             super.render(g, mouseX, mouseY, delta);
             if (tab == 1 || tab == 2 || tab == 4)
                 g.drawCenteredString(font, "Функции этой вкладки пока в разработке", width / 2, height / 2, 0xFFCCCCCC);
+        }
+    }
+
+
+    private static final class WaypointListScreen extends Screen {
+        private final Screen parent;
+        private final int page;
+        private WaypointListScreen(Screen parent, int page) {
+            super(Component.literal("RoundMap waypoints"));
+            this.parent = parent;
+            this.page = Math.max(0, page);
+        }
+        @Override protected void init() {
+            int x = width / 2 - 150, y = 44;
+            int perPage = Math.max(1, Math.min(8, (height - 110) / 26));
+            int start = page * perPage;
+            for (int i = start; i < Math.min(markers.size(), start + perPage); i++) {
+                final Marker marker = markers.get(i);
+                final int index = i;
+                int row = i - start;
+                addRenderableWidget(Button.builder(Component.literal(marker.name() + " [" + marker.x() + ", " + marker.z() + "]"),
+                    b -> minecraft.setScreen(new MapScreen(marker.x(), marker.z())))
+                    .bounds(x, y + row * 26, 245, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("X"), b -> {
+                    markers.remove(marker);
+                    saveMarkers();
+                    minecraft.setScreen(new WaypointListScreen(parent, Math.min(page, Math.max(0, (markers.size()-1)/perPage))));
+                }).bounds(x + 250, y + row * 26, 40, 20).build());
+            }
+            if (page > 0) addRenderableWidget(Button.builder(Component.literal("<"), b ->
+                minecraft.setScreen(new WaypointListScreen(parent, page - 1)))
+                .bounds(width / 2 - 105, height - 57, 90, 20).build());
+            if (start + perPage < markers.size()) addRenderableWidget(Button.builder(Component.literal(">"), b ->
+                minecraft.setScreen(new WaypointListScreen(parent, page + 1)))
+                .bounds(width / 2 + 15, height - 57, 90, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
+                minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            super.render(g, mouseX, mouseY, delta);
+            g.drawCenteredString(font, "Сохранённые точки: " + markers.size(), width / 2, 20, -1);
         }
     }
 
