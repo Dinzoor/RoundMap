@@ -29,7 +29,8 @@ import net.minecraft.world.level.material.MapColor;
 final class RoundMapAtlas {
     private static final int MAGIC = 0x524D4132; // RMA2
     private static final int RADIUS_CHUNKS = 10;
-    private static final int READS_PER_TICK = 8;
+    static int readsPerTick = 8;
+    static boolean detailed = true;
     private static final long SAVE_EVERY_NANOS = 60_000_000_000L;
     private static final ExecutorService IO = Executors.newSingleThreadExecutor(task -> {
         Thread t = new Thread(task, "RoundMap-atlas-io");
@@ -59,6 +60,7 @@ final class RoundMapAtlas {
         }
     }
 
+    static void forceRefresh() { lastChunkX = Integer.MIN_VALUE; }
     static int revision() { return revision; }
     static int exploredChunks() { return tiles.size(); }
 
@@ -146,7 +148,7 @@ final class RoundMapAtlas {
             lastChunkX = cx;
             lastChunkZ = cz;
         }
-        int budget = READS_PER_TICK;
+        int budget = readsPerTick;
         while (budget > 0) {
             if (active == Long.MIN_VALUE && !nextTile(mc)) break;
             int tileX = (int)(active >> 32), tileZ = (int)active;
@@ -228,7 +230,7 @@ final class RoundMapAtlas {
                     Tile tile = tiles.get(k);
                     if (tile == null || tile.stage == 0) coarseQueue.addLast(k);
                     // Refine nearby tiles after the coarse outer ring is available.
-                    if (radius <= 4 && (tile == null || tile.stage < 2))
+                    if (detailed && radius <= 4 && (tile == null || tile.stage < 2))
                         fineQueue.addLast(k);
                 }
             }
