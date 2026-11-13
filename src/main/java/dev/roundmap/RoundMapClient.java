@@ -82,6 +82,8 @@ public final class RoundMapClient implements ClientModInitializer {
             RoundMapFog.softEdges = Boolean.parseBoolean(p.getProperty("softFog", "true"));
             RoundMapAtlas.readsPerTick = Math.max(2, Math.min(16, Integer.parseInt(p.getProperty("scanBudget", "8"))));
             RoundMapAtlas.detailed = Boolean.parseBoolean(p.getProperty("detailed", "true"));
+            RoundMapAtlas.contours = Boolean.parseBoolean(p.getProperty("contours", "true"));
+            RoundMapAtlas.relief = Boolean.parseBoolean(p.getProperty("relief", "true"));
             RoundMapRadar.players = Boolean.parseBoolean(p.getProperty("radarPlayers", "true"));
             RoundMapRadar.hostile = Boolean.parseBoolean(p.getProperty("radarHostile", "false"));
             RoundMapRadar.passive = Boolean.parseBoolean(p.getProperty("radarPassive", "false"));
@@ -111,6 +113,8 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("softFog", Boolean.toString(RoundMapFog.softEdges));
         p.setProperty("scanBudget", Integer.toString(RoundMapAtlas.readsPerTick));
         p.setProperty("detailed", Boolean.toString(RoundMapAtlas.detailed));
+        p.setProperty("contours", Boolean.toString(RoundMapAtlas.contours));
+        p.setProperty("relief", Boolean.toString(RoundMapAtlas.relief));
         p.setProperty("radarPlayers", Boolean.toString(RoundMapRadar.players));
         p.setProperty("radarHostile", Boolean.toString(RoundMapRadar.hostile));
         p.setProperty("radarPassive", Boolean.toString(RoundMapRadar.passive));
@@ -510,6 +514,12 @@ public final class RoundMapClient implements ClientModInitializer {
                     () -> { brightFog = !brightFog; RoundMapTextures.invalidate(); savePosition(); });
                 option(right, top, cw, "Края тумана: " + (RoundMapFog.softEdges ? "Мягкие" : "Простые"),
                     () -> { RoundMapFog.softEdges = !RoundMapFog.softEdges;
+                        RoundMapTextures.invalidate(); savePosition(); });
+                option(left, top + step, cw, "Тени рельефа: " + (RoundMapAtlas.relief ? "Вкл" : "Выкл"),
+                    () -> { RoundMapAtlas.relief = !RoundMapAtlas.relief;
+                        RoundMapTextures.invalidate(); savePosition(); });
+                option(right, top + step, cw, "Контуры высот: " + (RoundMapAtlas.contours ? "Вкл" : "Выкл"),
+                    () -> { RoundMapAtlas.contours = !RoundMapAtlas.contours;
                         RoundMapTextures.invalidate(); savePosition(); });
             } else if (tab == 3) {
                 option(left, top, cw, "Названия: " + (showLabels ? "Вкл" : "Выкл"),
