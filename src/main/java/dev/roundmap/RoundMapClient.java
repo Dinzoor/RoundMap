@@ -298,7 +298,7 @@ public final class RoundMapClient implements ClientModInitializer {
             lastMinus = minus;
         }
         @Override public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-            if (mapKey.matches(event.key(), event.scancode())) { minecraft.setScreen(null); return true; }
+            if (mapKey.matches(event)) { minecraft.setScreen(null); return true; }
             return super.keyPressed(event);
         }
         @Override public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
