@@ -17,7 +17,11 @@ import net.minecraft.world.level.storage.LevelResource;
 final class RoundMapWorldIdentity {
     // Never write the old name-based atlas into a new world. Its contents may
     // already be mixed with terrain from multiple identically named saves.
-    private static final String STORAGE_VERSION = "v2";
+    // v3 deliberately starts a clean terrain atlas: earlier builds recorded
+    // placeholder dark gray pixels as fully explored chunks. Keep old files
+    // untouched so the user can restore them if necessary.
+    private static final String ATLAS_STORAGE_VERSION = "v3";
+    private static final String WAYPOINT_STORAGE_VERSION = "v2";
     private static final String SESSION_ID = UUID.randomUUID().toString();
 
     static String key(Minecraft mc) {
@@ -49,13 +53,13 @@ final class RoundMapWorldIdentity {
 
     static Path atlasPath(String key) {
         return FabricLoader.getInstance().getConfigDir()
-            .resolve("roundmap").resolve("explored").resolve(STORAGE_VERSION)
+            .resolve("roundmap").resolve("explored").resolve(ATLAS_STORAGE_VERSION)
             .resolve(hashed(key) + ".dat.gz");
     }
 
     static Path waypointPath(String key) {
         return FabricLoader.getInstance().getConfigDir()
-            .resolve("roundmap").resolve("waypoints").resolve(STORAGE_VERSION)
+            .resolve("roundmap").resolve("waypoints").resolve(WAYPOINT_STORAGE_VERSION)
             .resolve(hashed(key) + ".txt");
     }
 
