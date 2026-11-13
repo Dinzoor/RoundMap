@@ -314,6 +314,12 @@ final class RoundMapAtlas {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dx = -radius; dx <= radius; dx++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    // Explore an irregular disk, not a square of chunks. Together
+                    // with the blurred fog texture this creates organic map edges.
+                    int seed = (centerX + dx) * 73428767 ^ (centerZ + dz) * 912931;
+                    seed ^= seed >>> 13;
+                    double outer = RADIUS_CHUNKS - 1.0 + ((seed & 7) / 7.0) * 1.5;
+                    if (dx * dx + dz * dz > outer * outer) continue;
                     long k = key(centerX + dx, centerZ + dz);
                     Tile tile = tiles.get(k);
                     if (tile == null || tile.stage == 0) coarseQueue.addLast(k);
