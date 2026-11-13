@@ -79,6 +79,7 @@ public final class RoundMapClient implements ClientModInitializer {
             miniOpacity = Math.max(25, Math.min(100, Integer.parseInt(p.getProperty("opacity", "100"))));
             worldMarkerDistance = Math.max(64, Math.min(5000, Integer.parseInt(p.getProperty("worldMarkerDistance", "1500"))));
             brightFog = Boolean.parseBoolean(p.getProperty("brightFog", "true"));
+            RoundMapFog.softEdges = Boolean.parseBoolean(p.getProperty("softFog", "true"));
             RoundMapAtlas.readsPerTick = Math.max(2, Math.min(16, Integer.parseInt(p.getProperty("scanBudget", "8"))));
             RoundMapAtlas.detailed = Boolean.parseBoolean(p.getProperty("detailed", "true"));
             RoundMapRadar.players = Boolean.parseBoolean(p.getProperty("radarPlayers", "true"));
@@ -107,6 +108,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("opacity", Integer.toString(miniOpacity));
         p.setProperty("worldMarkerDistance", Integer.toString(worldMarkerDistance));
         p.setProperty("brightFog", Boolean.toString(brightFog));
+        p.setProperty("softFog", Boolean.toString(RoundMapFog.softEdges));
         p.setProperty("scanBudget", Integer.toString(RoundMapAtlas.readsPerTick));
         p.setProperty("detailed", Boolean.toString(RoundMapAtlas.detailed));
         p.setProperty("radarPlayers", Boolean.toString(RoundMapRadar.players));
@@ -506,6 +508,9 @@ public final class RoundMapClient implements ClientModInitializer {
             } else if (tab == 2) {
                 option(left, top, cw, "Туман войны: " + (brightFog ? "Светлый" : "Тёмный"),
                     () -> { brightFog = !brightFog; RoundMapTextures.invalidate(); savePosition(); });
+                option(right, top, cw, "Края тумана: " + (RoundMapFog.softEdges ? "Мягкие" : "Простые"),
+                    () -> { RoundMapFog.softEdges = !RoundMapFog.softEdges;
+                        RoundMapTextures.invalidate(); savePosition(); });
             } else if (tab == 3) {
                 option(left, top, cw, "Названия: " + (showLabels ? "Вкл" : "Выкл"),
                     () -> { showLabels = !showLabels; savePosition(); });
