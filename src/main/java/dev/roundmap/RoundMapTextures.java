@@ -9,8 +9,6 @@ import net.minecraft.resources.Identifier;
 
 /** Two GPU-backed map images; GUI rendering is a single textured quad per map. */
 final class RoundMapTextures {
-    private static final int UNKNOWN = 0xFFF1F3F6;
-    private static int fog() { return RoundMapClient.brightFog ? UNKNOWN : 0xFF27303A; }
     static void invalidate() { MINI.invalidate(); FULL.invalidate(); }
     private static final Image MINI = new Image("roundmap_minimap");
     private static final Image FULL = new Image("roundmap_fullmap");
@@ -68,9 +66,9 @@ final class RoundMapTextures {
                     } else {
                         int wx = playerX + (int)Math.floor(x * scale);
                         int wz = playerZ + (int)Math.floor(y * scale);
-                        int color = RoundMapAtlas.colorAt(wx, wz);
+                        int color = RoundMapFog.color(wx, wz);
                         int alpha = Math.max(0, Math.min(255, RoundMapClient.miniOpacity * 255 / 100));
-                        MINI.pixels.setPixel(px, py, ((color == 0 ? fog() : color) & 0x00FFFFFF) | (alpha << 24));
+                        MINI.pixels.setPixel(px, py, (color & 0x00FFFFFF) | (alpha << 24));
                     }
                 }
             }
@@ -92,8 +90,7 @@ final class RoundMapTextures {
                 int wz = worldZ + (int)Math.floor((py + .5 - th / 2.0) * blockPerTexel);
                 for (int px = 0; px < tw; px++) {
                     int wx = worldX + (int)Math.floor((px + .5 - tw / 2.0) * blockPerTexel);
-                    int color = RoundMapAtlas.colorAt(wx, wz);
-                    FULL.pixels.setPixel(px, py, color == 0 ? fog() : color);
+                    FULL.pixels.setPixel(px, py, RoundMapFog.color(wx, wz));
                 }
             }
             FULL.texture.upload();
