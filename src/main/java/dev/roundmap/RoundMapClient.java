@@ -133,13 +133,12 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final class MapScreen extends Screen {
         private double panX, panZ, oldX, oldY;
         private boolean wasDragging, lastClose;
-        private MapScreen() { super(Component.literal("RoundMap")); }
+        private MapScreen() { super(Component.literal("RoundMap")); lastClose = true; }
         @Override protected void init() {
             addRenderableWidget(Button.builder(Component.literal("Settings"), b ->
                 minecraft.setScreen(new OptionsScreen())).bounds(width - 95, 8, 85, 20).build());
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
-            super.render(g, mouseX, mouseY, delta);
             Minecraft mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) return;
             long handle = mc.getWindow().handle();
@@ -170,6 +169,7 @@ public final class RoundMapClient implements ClientModInitializer {
             g.fill(playerX - 3, playerZ - 3, playerX + 4, playerZ + 4, 0xFFFF5555);
             g.drawCenteredString(font, "RoundMap | drag: pan | +/-: zoom | ESC: close", width / 2, 12, -1);
             g.drawCenteredString(font, "X " + targetX + "  Z " + targetZ, width / 2, height - 16, -1);
+            super.render(g, mouseX, mouseY, delta);
             boolean close = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_M) == GLFW.GLFW_PRESS;
             if (close && !lastClose) minecraft.setScreen(null);
             lastClose = close;
