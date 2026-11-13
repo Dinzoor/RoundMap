@@ -1,21 +1,32 @@
-# RoundMap — Minecraft Java 1.21.11 / Fabric
+# RoundMap — Fabric 1.21.11 (0.2.0 alpha)
 
-Experimental **source project** for a north-up circular minimap. Displays terrain surface colors, heading marker, cardinal directions and coordinates. Does not show players or mobs. No waypoints or full-screen map yet.
+Experimental client-side world map, built for Minecraft Java 1.21.11 and Fabric API.
 
-## Build a JAR
+## Map features
+- Round HUD minimap with drag-to-position editor, terrain zoom, size and opacity.
+- Large fullscreen map (M by default), mouse drag, wheel zoom, recenter, right-click waypoint creation.
+- Persistent explored surface atlas and fog of war per world/server/dimension.
+- Map renders from GPU textures instead of per-pixel GUI rectangles.
+- Surface is captured incrementally on the client tick, never scanned during GUI rendering.
+- Waypoints visible on both maps and as directional labels in the game world.
+- Waypoint list with coordinates and deletion.
+- Optional player, hostile, passive, neutral and dropped-item radar.
+- Five tabs: Мини-карта, Радар, Оверлеи, Точки, Вид. UI supports Russian.
+- Keys can be rebound in Minecraft's standard Controls menu.
 
-Requirements: Java 21, Gradle 9.2.1, internet access. From this directory:
+## Setup
+Use Java 21, Fabric Loader and Fabric API for Minecraft 1.21.11.
+Build with `gradle build`; install the JAR from `build/libs/` without `-sources`.
+GitHub Actions also builds the JAR; see **Actions → Build Fabric JAR → Artifacts**.
 
-```bash
-gradle build
-```
-
-Find the mod in `build/libs/roundmap-0.1.0.jar` (do not use `-sources.jar`). Install Fabric Loader and Fabric API for Minecraft 1.21.11, then place the JAR in `.minecraft/mods`.
-
-### Build without installing Gradle locally
-
-Upload the project contents to a GitHub repository, open **Actions → Build Fabric JAR → Run workflow**. Download the `roundmap-jar` artifact after a successful run. This repository includes `.github/workflows/build.yml`.
+## Data and performance
+- Position, UI toggles, zoom and radar settings: `config/roundmap-position.properties`
+- Named waypoints: `config/roundmap-waypoints.txt`
+- Explored atlas: `config/roundmap/explored/*.dat.gz` (world-specific).
+- Lower **Вид → Сканирование** to 2 or 4 blocks/tick for lower overhead.
+- Switch **Вид → Качество** to **Быстро** for coarse but faster exploration.
 
 ## Limitations
+Work in progress. Terrain is based on Minecraft map colors, not a photorealistic block/biome renderer. Cave layers, polished 3D waypoint projections, smoothing of fog boundaries, world marker icons/colors and all Diorama features are **not yet implemented**. Fullscreen rendering and storage have been rewritten but still require in-game testing for visual correctness and performance. Radar only uses nearby entities already sent to the client; it does not discover unseen entities.
 
-This is an untested prototype, **not a verified compiled JAR**. Some Minecraft/Fabric API symbols or dependency versions may need adjustment when building. Rendering samples many world positions every frame and can lower FPS; a production version should cache terrain samples, throttle updates and use GPU textures. Unloaded chunks use a dark background. Server rules may forbid minimaps even if they are client-side.
+RoundMap is an independent fan project, not affiliated with Diorama.
