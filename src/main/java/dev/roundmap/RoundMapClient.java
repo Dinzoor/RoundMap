@@ -48,6 +48,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
     private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true, showWorldMarkers = true;
     static int miniOpacity = 100;
+    private static int worldMarkerDistance = 1500;
     static boolean brightFog = true;
     private static int miniSize = 48, mapZoom = 3;
     private static double miniZoom = 1.0;
@@ -72,6 +73,7 @@ public final class RoundMapClient implements ClientModInitializer {
             showLabels = Boolean.parseBoolean(p.getProperty("labels", "true"));
             showWorldMarkers = Boolean.parseBoolean(p.getProperty("worldMarkers", "true"));
             miniOpacity = Math.max(25, Math.min(100, Integer.parseInt(p.getProperty("opacity", "100"))));
+            worldMarkerDistance = Math.max(64, Math.min(5000, Integer.parseInt(p.getProperty("worldMarkerDistance", "1500"))));
             brightFog = Boolean.parseBoolean(p.getProperty("brightFog", "true"));
             RoundMapAtlas.readsPerTick = Math.max(2, Math.min(16, Integer.parseInt(p.getProperty("scanBudget", "8"))));
             RoundMapAtlas.detailed = Boolean.parseBoolean(p.getProperty("detailed", "true"));
@@ -98,6 +100,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("labels", Boolean.toString(showLabels));
         p.setProperty("worldMarkers", Boolean.toString(showWorldMarkers));
         p.setProperty("opacity", Integer.toString(miniOpacity));
+        p.setProperty("worldMarkerDistance", Integer.toString(worldMarkerDistance));
         p.setProperty("brightFog", Boolean.toString(brightFog));
         p.setProperty("scanBudget", Integer.toString(RoundMapAtlas.readsPerTick));
         p.setProperty("detailed", Boolean.toString(RoundMapAtlas.detailed));
@@ -241,7 +244,7 @@ public final class RoundMapClient implements ClientModInitializer {
             double dx = marker.x() + 0.5 - mc.player.getX();
             double dz = marker.z() + 0.5 - mc.player.getZ();
             double distance = Math.hypot(dx, dz);
-            if (distance < 3 || distance > 1500) continue;
+            if (distance < 3 || distance > worldMarkerDistance) continue;
             double forward = dx * forwardX + dz * forwardZ;
             if (forward <= 0) continue;
             double side = dx * rightX + dz * rightZ;
@@ -407,84 +410,98 @@ public final class RoundMapClient implements ClientModInitializer {
             this.tab = tab;
         }
         private void refresh() { minecraft.setScreen(new OptionsScreen(parent, tab)); }
-        private void addOption(int x, int y, int w, String label, Runnable action) {
-            addRenderableWidget(Button.builder(Component.literal(label), b -> { action.run(); refresh(); })
+        private void option(int x, int y, int w, String label, Runnable action) {
+            addRenderableWidget(Button.builder(Component.literal(label), b -> {
+                action.run();
+                refresh();
+            }).bounds(x, y, w, 20).build());
+        }
+        private void link(int x, int y, int w, String label, Runnable action) {
+            addRenderableWidget(Button.builder(Component.literal(label), b -> action.run())
                 .bounds(x, y, w, 20).build());
         }
         @Override protected void init() {
-            int tabWidth = Math.min(142, Math.max(68, (width - 20) / 5));
-            int left = (width - tabWidth * 5) / 2;
+            int tabWidth = Math.min(142, Math.max(62, (width - 20) / 5));
+            int tabLeft = (width - tabWidth * 5) / 2;
             for (int i = 0; i < TABS.length; i++) {
                 final int selected = i;
                 addRenderableWidget(Button.builder(Component.literal((i == tab ? "• " : "") + TABS[i]),
                     b -> minecraft.setScreen(new OptionsScreen(parent, selected)))
-                    .bounds(left + i * tabWidth, 12, tabWidth - 3, 20).build());
+                    .bounds(tabLeft + i * tabWidth, 9, tabWidth - 3, 20).build());
             }
-            int w = Math.min(280, width - 24), x = (width - w) / 2;
-            int y = Math.max(44, height / 2 - 66);
+            int cw = Math.min(220, Math.max(90, (width - 36) / 2));
+            int left = width / 2 - cw - 5, right = width / 2 + 5;
+            int top = 43, step = 26;
             if (tab == 0) {
-                addOption(x, y, w, "Мини-карта: " + (showMini ? "Вкл" : "Выкл"), () -> { showMini = !showMini; savePosition(); });
-                addOption(x, y + 25, w, "Размер мини-карты: " + miniSize, () ->
-                    { miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48; savePosition(); });
-                addOption(x, y + 50, w, "Координаты: " + (showCoords ? "Вкл" : "Выкл"), () -> { showCoords = !showCoords; savePosition(); });
-                addOption(x, y + 75, w, "Компас: " + (showCompass ? "Вкл" : "Выкл"), () -> { showCompass = !showCompass; savePosition(); });
-                addOption(x, y + 100, w, "Масштаб местности: " + (int)(miniZoom * 100) + "%", () -> { miniZoom = miniZoom >= 4.0 ? 1.0 : miniZoom + 0.5; savePosition(); });
-                addOption(x, y + 125, w, "Прозрачность: " + miniOpacity + "%", () -> {
-                    miniOpacity = miniOpacity <= 25 ? 100 : miniOpacity - 25;
-                    RoundMapTextures.invalidate(); savePosition();
-                });
-                addRenderableWidget(Button.builder(Component.literal("Переместить мини-карту мышью"),
-                    b -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))))
-                    .bounds(x, y + 150, w, 20).build());
+                option(left, top, cw, "Мини-карта: " + (showMini ? "Вкл" : "Выкл"),
+                    () -> { showMini = !showMini; savePosition(); });
+                option(left, top + step, cw, "Координаты: " + (showCoords ? "Вкл" : "Выкл"),
+                    () -> { showCoords = !showCoords; savePosition(); });
+                option(left, top + 2 * step, cw, "Компас: " + (showCompass ? "Вкл" : "Выкл"),
+                    () -> { showCompass = !showCompass; savePosition(); });
+                option(left, top + 3 * step, cw, "Размер круга: " + miniSize,
+                    () -> { miniSize = miniSize == 36 ? 48 : miniSize == 48 ? 60 : 36; savePosition(); });
+                option(right, top, cw, "Масштаб: " + (int)(miniZoom * 100) + "%",
+                    () -> { miniZoom = miniZoom >= 4.0 ? 1.0 : miniZoom + 0.5; savePosition(); });
+                option(right, top + step, cw, "Непрозрачность: " + miniOpacity + "%",
+                    () -> { miniOpacity = miniOpacity <= 25 ? 100 : miniOpacity - 25; RoundMapTextures.invalidate(); savePosition(); });
+                link(right, top + 2 * step, cw, "Переместить мышью",
+                    () -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))));
             } else if (tab == 1) {
-                addOption(x, y, w, "На мини-карте: " + (RoundMapRadar.onMini ? "Вкл" : "Выкл"), () -> {
-                    RoundMapRadar.onMini = !RoundMapRadar.onMini; savePosition(); });
-                addOption(x, y + 25, w, "На большой карте: " + (RoundMapRadar.onFull ? "Вкл" : "Выкл"), () -> {
-                    RoundMapRadar.onFull = !RoundMapRadar.onFull; savePosition(); });
-                addOption(x, y + 50, w, "Игроки: " + (RoundMapRadar.players ? "Вкл" : "Выкл"), () -> {
-                    RoundMapRadar.players = !RoundMapRadar.players; savePosition(); });
-                addOption(x, y + 75, w, "Враждебные мобы: " + (RoundMapRadar.hostile ? "Вкл" : "Выкл"), () -> {
-                    RoundMapRadar.hostile = !RoundMapRadar.hostile; savePosition(); });
-                addOption(x, y + 100, w, "Мирные мобы: " + (RoundMapRadar.passive ? "Вкл" : "Выкл"), () -> {
-                    RoundMapRadar.passive = !RoundMapRadar.passive; savePosition(); });
-                addOption(x, y + 125, w, "Нейтральные мобы: " + (RoundMapRadar.neutral ? "Вкл" : "Выкл"), () -> {
-                    RoundMapRadar.neutral = !RoundMapRadar.neutral; savePosition(); });
-                addOption(x, y + 150, w, "Предметы: " + (RoundMapRadar.items ? "Вкл" : "Выкл"), () -> {
-                    RoundMapRadar.items = !RoundMapRadar.items; savePosition(); });
+                option(left, top, cw, "На мини-карте: " + (RoundMapRadar.onMini ? "Вкл" : "Выкл"),
+                    () -> { RoundMapRadar.onMini = !RoundMapRadar.onMini; savePosition(); });
+                option(left, top + step, cw, "На большой карте: " + (RoundMapRadar.onFull ? "Вкл" : "Выкл"),
+                    () -> { RoundMapRadar.onFull = !RoundMapRadar.onFull; savePosition(); });
+                option(left, top + 2 * step, cw, "Игроки: " + (RoundMapRadar.players ? "Вкл" : "Выкл"),
+                    () -> { RoundMapRadar.players = !RoundMapRadar.players; savePosition(); });
+                option(left, top + 3 * step, cw, "Враждебные: " + (RoundMapRadar.hostile ? "Вкл" : "Выкл"),
+                    () -> { RoundMapRadar.hostile = !RoundMapRadar.hostile; savePosition(); });
+                option(right, top, cw, "Мирные мобы: " + (RoundMapRadar.passive ? "Вкл" : "Выкл"),
+                    () -> { RoundMapRadar.passive = !RoundMapRadar.passive; savePosition(); });
+                option(right, top + step, cw, "Нейтральные: " + (RoundMapRadar.neutral ? "Вкл" : "Выкл"),
+                    () -> { RoundMapRadar.neutral = !RoundMapRadar.neutral; savePosition(); });
+                option(right, top + 2 * step, cw, "Предметы: " + (RoundMapRadar.items ? "Вкл" : "Выкл"),
+                    () -> { RoundMapRadar.items = !RoundMapRadar.items; savePosition(); });
             } else if (tab == 2) {
-                addOption(x, y, w, "Туман войны: " + (brightFog ? "Светлый" : "Тёмный"), () -> {
-                    brightFog = !brightFog; RoundMapTextures.invalidate(); savePosition(); });
-            } else if (tab == 4) {
-                addOption(x, y, w, "Детализация: " + (RoundMapAtlas.detailed ? "Подробно" : "Быстро"), () -> {
-                    RoundMapAtlas.detailed = !RoundMapAtlas.detailed;
-                    RoundMapAtlas.forceRefresh(); savePosition(); });
-                addOption(x, y + 25, w, "Скорость исследования: " + RoundMapAtlas.readsPerTick + " блоков/тик", () -> {
-                    RoundMapAtlas.readsPerTick = RoundMapAtlas.readsPerTick >= 16 ? 2 :
-                        RoundMapAtlas.readsPerTick == 2 ? 4 : RoundMapAtlas.readsPerTick == 4 ? 8 : 16;
-                    savePosition(); });
+                option(left, top, cw, "Туман войны: " + (brightFog ? "Светлый" : "Тёмный"),
+                    () -> { brightFog = !brightFog; RoundMapTextures.invalidate(); savePosition(); });
             } else if (tab == 3) {
-                addOption(x, y, w, "Названия точек: " + (showLabels ? "Вкл" : "Выкл"),
+                option(left, top, cw, "Названия: " + (showLabels ? "Вкл" : "Выкл"),
                     () -> { showLabels = !showLabels; savePosition(); });
-                addRenderableWidget(Button.builder(Component.literal("Создать точку у игрока"), b -> {
+                option(left, top + step, cw, "Метки в мире: " + (showWorldMarkers ? "Вкл" : "Выкл"),
+                    () -> { showWorldMarkers = !showWorldMarkers; savePosition(); });
+                option(left, top + 2 * step, cw, "Дальность: " + worldMarkerDistance + " м",
+                    () -> { worldMarkerDistance = worldMarkerDistance >= 1500 ? 256 :
+                        worldMarkerDistance == 256 ? 512 : 1500; savePosition(); });
+                link(right, top, cw, "Добавить точку у игрока", () -> {
                     if (minecraft.player != null && minecraft.level != null)
                         minecraft.setScreen(new NameScreen(minecraft.player.getBlockX(),
-                            minecraft.player.getBlockZ(), minecraft.level.dimension().toString()));
-                }).bounds(x, y + 25, w, 20).build());
-                addOption(x, y + 50, w, "Метки в мире: " + (showWorldMarkers ? "Вкл" : "Выкл"), () -> { showWorldMarkers = !showWorldMarkers; savePosition(); });
-                addRenderableWidget(Button.builder(Component.literal("Список точек"), b ->
-                    minecraft.setScreen(new WaypointListScreen(new OptionsScreen(parent, tab), 0)))
-                    .bounds(x, y + 75, w, 20).build());
+                            minecraft.player.getBlockZ(), minecraft.level.dimension().toString(), this));
+                });
+                link(right, top + step, cw, "Список точек",
+                    () -> minecraft.setScreen(new WaypointListScreen(this, 0)));
+            } else if (tab == 4) {
+                option(left, top, cw, "Качество: " + (RoundMapAtlas.detailed ? "Детально" : "Быстро"),
+                    () -> { RoundMapAtlas.detailed = !RoundMapAtlas.detailed; RoundMapAtlas.forceRefresh(); savePosition(); });
+                option(left, top + step, cw, "Сканирование: " + RoundMapAtlas.readsPerTick + " / тик",
+                    () -> { RoundMapAtlas.readsPerTick = RoundMapAtlas.readsPerTick >= 16 ? 2 :
+                        RoundMapAtlas.readsPerTick == 2 ? 4 : RoundMapAtlas.readsPerTick == 4 ? 8 : 16;
+                        savePosition(); });
             }
             addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
                 minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xC0161C29);
             super.render(g, mouseX, mouseY, delta);
             if (tab == 2)
-                g.drawCenteredString(font, "Неисследованные территории остаются скрытыми", width / 2, height / 2, 0xFFCCCCCC);
+                g.drawCenteredString(font, "Белым или тёмным цветом скрыты неизученные участки",
+                    width / 2, height / 2, 0xFFCCCCCC);
+            if (tab == 4)
+                g.drawCenteredString(font, "Для высокого FPS выбери Быстро и 2-4 блока/тик",
+                    width / 2, height / 2 + 25, 0xFFCCCCCC);
         }
     }
-
 
     private static final class WaypointListScreen extends Screen {
         private final Screen parent;
