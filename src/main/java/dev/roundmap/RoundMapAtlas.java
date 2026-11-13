@@ -97,6 +97,7 @@ final class RoundMapAtlas {
         world = mc.level;
         revision++;
         dirty = false;
+        lastSave = System.nanoTime();
         if (mc.level == null) {
             diskPath = null;
             worldKey = "";
