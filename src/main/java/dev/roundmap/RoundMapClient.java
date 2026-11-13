@@ -336,11 +336,11 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     private static void drawMarkers(GuiGraphics g, Minecraft mc, int cx, int cy,
-            float scale, int radius, boolean circle, int worldX, int worldZ) {
+            float scale, int radius, boolean circle, double worldX, double worldZ) {
         for (Marker marker : markers) {
             if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
-            int dx = Math.round((marker.x() - worldX) * scale);
-            int dz = Math.round((marker.z() - worldZ) * scale);
+            int dx = (int)Math.round((marker.x() - worldX) * scale);
+            int dz = (int)Math.round((marker.z() - worldZ) * scale);
             int limitX = circle ? radius - 4 : g.guiWidth() / 2 - 4;
             int limitY = circle ? radius - 4 : g.guiHeight() / 2 - 4;
             if (Math.abs(dx) >= limitX || Math.abs(dz) >= limitY) continue;
@@ -455,11 +455,13 @@ public final class RoundMapClient implements ClientModInitializer {
             }
             wasDragging = dragging;
             oldX = mouseX; oldY = mouseY;
-            int targetX = mc.player.getBlockX() + (int)Math.round(panX);
-            int targetZ = mc.player.getBlockZ() + (int)Math.round(panZ);
+            // Keep fractional pan positions for pixel-by-pixel smooth movement.
+            double targetX = mc.player.getBlockX() + panX;
+            double targetZ = mc.player.getBlockZ() + panZ;
             RoundMapTextures.fullscreen(g, width, height, targetX, targetZ, mapZoom);
             int cx = width / 2, cy = height / 2;
-            RoundMapRadar.draw(g, mc, cx, cy, targetX, targetZ,
+            RoundMapRadar.draw(g, mc, cx, cy,
+                (int)Math.round(targetX), (int)Math.round(targetZ),
                 mapZoom, width / 2, height / 2, false);
             drawMarkers(g, mc, cx, cy, mapZoom, Math.max(width, height) / 2,
                 false, targetX, targetZ);
@@ -472,8 +474,8 @@ public final class RoundMapClient implements ClientModInitializer {
             g.drawString(font, "RoundMap  •  Изучено чанков: " + RoundMapAtlas.exploredChunks(),
                 10, 12, 0xFFFFFFFF);
             g.fill(0, height - 25, width, height, 0xB018222C);
-            int hoveredX = targetX + (int)Math.round((mouseX - cx) / (double)mapZoom);
-            int hoveredZ = targetZ + (int)Math.round((mouseY - cy) / (double)mapZoom);
+            int hoveredX = (int)Math.round(targetX + (mouseX - cx) / (double)mapZoom);
+            int hoveredZ = (int)Math.round(targetZ + (mouseY - cy) / (double)mapZoom);
             g.drawString(font, "ЛКМ: сдвиг   Колесо: масштаб   ПКМ: добавить точку   M: закрыть",
                 8, height - 17, 0xFFE3E6EB);
             g.drawString(font, "X " + hoveredX + " Z " + hoveredZ,
