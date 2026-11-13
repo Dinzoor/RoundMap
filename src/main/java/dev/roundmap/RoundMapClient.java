@@ -309,32 +309,57 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     private static final class OptionsScreen extends Screen {
+        private static final String[] TABS = {"Мини-карта", "Радар", "Оверлеи", "Точки", "Вид"};
         private final Screen parent;
-        private OptionsScreen() { this(null); }
-        private OptionsScreen(Screen parent) {
+        private final int tab;
+        private OptionsScreen() { this(null, 0); }
+        private OptionsScreen(Screen parent) { this(parent, 0); }
+        private OptionsScreen(Screen parent, int tab) {
             super(Component.literal("RoundMap settings"));
             this.parent = parent;
+            this.tab = tab;
         }
-        private void returnToParent() { minecraft.setScreen(parent); }
+        private void refresh() { minecraft.setScreen(new OptionsScreen(parent, tab)); }
+        private void addOption(int x, int y, int w, String label, Runnable action) {
+            addRenderableWidget(Button.builder(Component.literal(label), b -> { action.run(); refresh(); })
+                .bounds(x, y, w, 20).build());
+        }
         @Override protected void init() {
-            int x = width / 2 - 105, y = height / 2 - 65;
-            addRenderableWidget(Button.builder(Component.literal("Minimap: " + (showMini ? "ON" : "OFF")), b -> {
-                showMini = !showMini; minecraft.setScreen(new OptionsScreen(parent));
-            }).bounds(x, y, 210, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Waypoint labels: " + (showLabels ? "ON" : "OFF")), b -> {
-                showLabels = !showLabels; minecraft.setScreen(new OptionsScreen(parent));
-            }).bounds(x, y + 25, 210, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Minimap size: " + miniSize), b -> {
-                miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48;
-                minecraft.setScreen(new OptionsScreen(parent));
-            }).bounds(x, y + 50, 210, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Move minimap (drag)"), b ->
-                minecraft.setScreen(new PositionScreen(parent))).bounds(x, y + 80, 210, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Done"), b ->
-                returnToParent()).bounds(x, y + 110, 210, 20).build());
+            int tabWidth = Math.min(142, Math.max(68, (width - 20) / 5));
+            int left = (width - tabWidth * 5) / 2;
+            for (int i = 0; i < TABS.length; i++) {
+                final int selected = i;
+                addRenderableWidget(Button.builder(Component.literal((i == tab ? "• " : "") + TABS[i]),
+                    b -> minecraft.setScreen(new OptionsScreen(parent, selected)))
+                    .bounds(left + i * tabWidth, 12, tabWidth - 3, 20).build());
+            }
+            int w = Math.min(280, width - 24), x = (width - w) / 2;
+            int y = Math.max(44, height / 2 - 66);
+            if (tab == 0) {
+                addOption(x, y, w, "Мини-карта: " + (showMini ? "Вкл" : "Выкл"), () -> showMini = !showMini);
+                addOption(x, y + 25, w, "Размер мини-карты: " + miniSize, () ->
+                    miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48);
+                addRenderableWidget(Button.builder(Component.literal("Переместить мини-карту мышью"),
+                    b -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))))
+                    .bounds(x, y + 50, w, 20).build());
+            } else if (tab == 3) {
+                addOption(x, y, w, "Названия точек: " + (showLabels ? "Вкл" : "Выкл"),
+                    () -> showLabels = !showLabels);
+                addRenderableWidget(Button.builder(Component.literal("Создать точку у игрока"), b -> {
+                    if (minecraft.player != null && minecraft.level != null)
+                        minecraft.setScreen(new NameScreen(minecraft.player.getBlockX(),
+                            minecraft.player.getBlockZ(), minecraft.level.dimension().toString()));
+                }).bounds(x, y + 25, w, 20).build());
+            }
+            addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
+                minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            super.render(g, mouseX, mouseY, delta);
+            if (tab == 1 || tab == 2 || tab == 4)
+                g.drawCenteredString(font, "Функции этой вкладки пока в разработке", width / 2, height / 2, 0xFFCCCCCC);
         }
     }
-
 
     private static final class PositionScreen extends Screen {
         private final Screen returnScreen;
