@@ -410,6 +410,9 @@ public final class RoundMapClient implements ClientModInitializer {
         private double panX, panZ, oldX, oldY;
         private boolean wasDragging, wasRight, lastPlus, lastMinus;
         private MapScreen() { super(Component.literal("RoundMap")); }
+        // Keep client ticks running in singleplayer while the map is open so
+        // nearby rendered chunks can continue to appear on the atlas.
+        @Override public boolean isPauseScreen() { return false; }
         private MapScreen(int x, int z) {
             this();
             Minecraft mc = Minecraft.getInstance();
