@@ -46,7 +46,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static Object lastWorld;
     private static KeyMapping mapKey, waypointKey, optionsKey, toggleKey, zoomInKey, zoomOutKey, listKey;
     private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
-    private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true;
+    private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true, showWorldMarkers = true;
     private static int miniSize = 48, mapZoom = 3;
     private static double miniZoom = 1.0;
     private static double miniX = -1, miniY = -1;
@@ -68,6 +68,7 @@ public final class RoundMapClient implements ClientModInitializer {
             showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
             showCompass = Boolean.parseBoolean(p.getProperty("compass", "true"));
             showLabels = Boolean.parseBoolean(p.getProperty("labels", "true"));
+            showWorldMarkers = Boolean.parseBoolean(p.getProperty("worldMarkers", "true"));
             if (!Double.isFinite(miniX) || !Double.isFinite(miniY)) { miniX = -1; miniY = -1; }
         } catch (IOException | IllegalArgumentException e) { System.err.println("[RoundMap] Cannot load position: " + e); }
     }
@@ -82,6 +83,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("coords", Boolean.toString(showCoords));
         p.setProperty("compass", Boolean.toString(showCompass));
         p.setProperty("labels", Boolean.toString(showLabels));
+        p.setProperty("worldMarkers", Boolean.toString(showWorldMarkers));
         try {
             Files.createDirectories(POSITION_FILE.getParent());
             try (OutputStream out = Files.newOutputStream(POSITION_FILE)) { p.store(out, "RoundMap minimap center, normalized to screen"); }
@@ -205,8 +207,37 @@ public final class RoundMapClient implements ClientModInitializer {
             recenter(mc, px, pz);
         }
         if (showMini && !mc.options.hideGui) sample(mc);
-        if (!showMini || mc.options.hideGui) return;
-        drawMini(g, mc, miniCenterX(g.guiWidth()), miniCenterY(g.guiHeight()));
+        if (mc.options.hideGui) return;
+        if (showWorldMarkers && mc.screen == null) drawWorldMarkers(g, mc);
+        if (showMini) drawMini(g, mc, miniCenterX(g.guiWidth()), miniCenterY(g.guiHeight()));
+    }
+
+
+    // Lightweight screen-space waypoint labels: no block scanning or extra world rendering.
+    private static void drawWorldMarkers(GuiGraphics g, Minecraft mc) {
+        double yaw = Math.toRadians(mc.player.getYRot());
+        double forwardX = -Math.sin(yaw), forwardZ = Math.cos(yaw);
+        double rightX = -forwardZ, rightZ = forwardX;
+        int w = g.guiWidth(), h = g.guiHeight();
+        for (Marker marker : markers) {
+            if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
+            double dx = marker.x() + 0.5 - mc.player.getX();
+            double dz = marker.z() + 0.5 - mc.player.getZ();
+            double distance = Math.hypot(dx, dz);
+            if (distance < 3 || distance > 1500) continue;
+            double forward = dx * forwardX + dz * forwardZ;
+            if (forward <= 0) continue;
+            double side = dx * rightX + dz * rightZ;
+            double angle = Math.atan2(side, forward);
+            if (Math.abs(angle) > Math.toRadians(55)) continue;
+            int sx = w / 2 + (int)Math.round(angle / Math.toRadians(55) * w * 0.43);
+            int sy = h / 3;
+            String label = marker.name() + " - " + (int)Math.round(distance) + " m";
+            int tw = mc.font.width(label);
+            g.fill(sx - tw / 2 - 5, sy - 16, sx + tw / 2 + 5, sy + 4, 0x990B111A);
+            g.fill(sx - 3, sy - 22, sx + 4, sy - 15, 0xFFFFD640);
+            g.drawCenteredString(mc.font, label, sx, sy - 12, 0xFFFFFFFF);
+        }
     }
 
     private static void drawMini(GuiGraphics g, Minecraft mc, int cx, int cy) {
@@ -382,9 +413,10 @@ public final class RoundMapClient implements ClientModInitializer {
                         minecraft.setScreen(new NameScreen(minecraft.player.getBlockX(),
                             minecraft.player.getBlockZ(), minecraft.level.dimension().toString()));
                 }).bounds(x, y + 25, w, 20).build());
+                addOption(x, y + 50, w, "Метки в мире: " + (showWorldMarkers ? "Вкл" : "Выкл"), () -> { showWorldMarkers = !showWorldMarkers; savePosition(); });
                 addRenderableWidget(Button.builder(Component.literal("Список точек"), b ->
                     minecraft.setScreen(new WaypointListScreen(new OptionsScreen(parent, tab), 0)))
-                    .bounds(x, y + 50, w, 20).build());
+                    .bounds(x, y + 75, w, 20).build());
             }
             addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
                 minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
