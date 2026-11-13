@@ -354,44 +354,53 @@ public final class RoundMapClient implements ClientModInitializer {
      * Draw a north-up player arrow on both map views. Minecraft yaw=0 faces
      * south (+Z); screen maps +Z downward.
      */
+    /**
+     * High-contrast navigator arrow inspired by the familiar white map
+     * pointer: black shadow, red rim and white center with a notched tail.
+     * It is drawn from our own geometry, with no external art assets.
+     */
     private static void playerArrow(GuiGraphics g, Minecraft mc, int cx, int cy) {
         double yaw = Math.toRadians(mc.player.getYRot());
-        double forwardX = -Math.sin(yaw), forwardY = Math.cos(yaw);
-        double sideX = forwardY, sideY = -forwardX;
-        drawArrowTriangle(g, cx, cy, forwardX, forwardY, sideX, sideY,
-            11, 7, 7, 0xFF12191E);
-        drawArrowTriangle(g, cx, cy, forwardX, forwardY, sideX, sideY,
-            8, 5, 4, 0xFFFFFFFF);
+        double fx = -Math.sin(yaw), fy = Math.cos(yaw);
+        double sx = fy, sy = -fx;
+        arrowShape(g, cx + 1, cy + 2, fx, fy, sx, sy, 1.25, 0xFF131923);
+        arrowShape(g, cx, cy, fx, fy, sx, sy, 1.14, 0xFF151619);
+        arrowShape(g, cx, cy, fx, fy, sx, sy, 1.0, 0xFFFF4848);
+        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.73, 0xFFFFFFFF);
     }
 
-    private static void drawArrowTriangle(GuiGraphics g, int cx, int cy,
-            double forwardX, double forwardY, double sideX, double sideY,
-            int tipLength, int backLength, int wingWidth, int color) {
-        int ax = cx + (int)Math.round(forwardX * tipLength);
-        int ay = cy + (int)Math.round(forwardY * tipLength);
-        int bx = cx - (int)Math.round(forwardX * backLength - sideX * wingWidth);
-        int by = cy - (int)Math.round(forwardY * backLength - sideY * wingWidth);
-        int dx = cx - (int)Math.round(forwardX * backLength + sideX * wingWidth);
-        int dy = cy - (int)Math.round(forwardY * backLength + sideY * wingWidth);
-        int minY = Math.min(ay, Math.min(by, dy));
-        int maxY = Math.max(ay, Math.max(by, dy));
-        int minX = Math.min(ax, Math.min(bx, dx));
-        int maxX = Math.max(ax, Math.max(bx, dx));
+    private static void arrowShape(GuiGraphics g, int cx, int cy,
+            double fx, double fy, double sx, double sy, double scale, int color) {
+        // Arrow tip, right wing, notched tail, left wing.
+        double[] p = {12, -8, -3, -8};
+        double[] q = {0, 7, 0, -7};
+        int[] px = new int[4], py = new int[4];
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        for (int i = 0; i < 4; i++) {
+            px[i] = cx + (int)Math.round((fx * p[i] + sx * q[i]) * scale);
+            py[i] = cy + (int)Math.round((fy * p[i] + sy * q[i]) * scale);
+            minX = Math.min(minX, px[i]); maxX = Math.max(maxX, px[i]);
+            minY = Math.min(minY, py[i]); maxY = Math.max(maxY, py[i]);
+        }
         for (int y = minY; y <= maxY; y++) {
-            int run = Integer.MIN_VALUE;
+            int runStart = Integer.MIN_VALUE;
             for (int x = minX; x <= maxX + 1; x++) {
                 boolean inside = false;
                 if (x <= maxX) {
-                    int e1 = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
-                    int e2 = (dx - bx) * (y - by) - (dy - by) * (x - bx);
-                    int e3 = (ax - dx) * (y - dy) - (ay - dy) * (x - dx);
-                    inside = (e1 >= 0 && e2 >= 0 && e3 >= 0)
-                        || (e1 <= 0 && e2 <= 0 && e3 <= 0);
+                    double testX = x + 0.5, testY = y + 0.5;
+                    for (int i = 0, j = 3; i < 4; j = i++) {
+                        if ((py[i] > testY) != (py[j] > testY)) {
+                            double crossing = px[i] + (testY - py[i]) * (px[j] - px[i])
+                                / (double)(py[j] - py[i]);
+                            if (testX < crossing) inside = !inside;
+                        }
+                    }
                 }
-                if (inside && run == Integer.MIN_VALUE) run = x;
-                if (!inside && run != Integer.MIN_VALUE) {
-                    g.fill(run, y, x, y + 1, color);
-                    run = Integer.MIN_VALUE;
+                if (inside && runStart == Integer.MIN_VALUE) runStart = x;
+                if (!inside && runStart != Integer.MIN_VALUE) {
+                    g.fill(runStart, y, x, y + 1, color);
+                    runStart = Integer.MIN_VALUE;
                 }
             }
         }
