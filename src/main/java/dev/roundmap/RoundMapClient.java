@@ -24,6 +24,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final int[][] terrain = new int[GRID][GRID];
     private static final List<Marker> markers = new ArrayList<>();
     private static int centerX, centerZ, scan = GRID * GRID;
+    private static long nextSampleAt;
     private static Object lastWorld;
     private static boolean lastM, lastB, lastO;
     private static boolean showMini = true, showLabels = true;
@@ -42,13 +43,17 @@ public final class RoundMapClient implements ClientModInitializer {
         centerX = x;
         centerZ = z;
         scan = 0;
+        nextSampleAt = 0;
         for (int row = 0; row < GRID; row++)
             for (int col = 0; col < GRID; col++) terrain[row][col] = EMPTY;
     }
 
     private static void sample(Minecraft mc) {
-        // A strict budget avoids the huge world scans that caused FPS drops.
-        for (int n = 0; n < 180 && scan < GRID * GRID; n++, scan++) {
+        // Sample no more than 24 blocks every 50ms; never scan on every render frame.
+        long now = System.nanoTime();
+        if (now < nextSampleAt) return;
+        nextSampleAt = now + 50_000_000L;
+        for (int n = 0; n < 24 && scan < GRID * GRID; n++, scan++) {
             int row = scan / GRID, col = scan % GRID;
             int x = centerX + col - HALF, z = centerZ + row - HALF;
             BlockPos pos = new BlockPos(x, 0, z);
@@ -84,14 +89,22 @@ public final class RoundMapClient implements ClientModInitializer {
         sample(mc);
         if (!showMini || mc.options.hideGui) return;
         int cx = g.guiWidth() - miniSize - 12, cy = miniSize + 18;
-        // Limit rendering to the circular 97x97 grid; 1 sampled world block per cell.
+        // Draw horizontal color runs instead of one GPU rectangle per pixel.
         for (int y = -miniSize; y <= miniSize; y++) {
             int gy = HALF + y * HALF / miniSize;
             if (gy < 0 || gy >= GRID) continue;
             int extent = (int)Math.sqrt(miniSize * miniSize - y * y);
-            for (int x = -extent; x <= extent; x++) {
+            int runStart = -extent;
+            int lastColor = Integer.MIN_VALUE;
+            for (int x = -extent; x <= extent + 1; x++) {
                 int gx = HALF + x * HALF / miniSize;
-                if (gx >= 0 && gx < GRID) g.fill(cx + x, cy + y, cx + x + 1, cy + y + 1, terrain[gy][gx]);
+                int color = x > extent || gx < 0 || gx >= GRID ? Integer.MIN_VALUE : terrain[gy][gx];
+                if (color != lastColor) {
+                    if (lastColor != Integer.MIN_VALUE)
+                        g.fill(cx + runStart, cy + y, cx + x, cy + y + 1, lastColor);
+                    runStart = x;
+                    lastColor = color;
+                }
             }
         }
         outline(g, cx, cy, miniSize);
@@ -158,9 +171,19 @@ public final class RoundMapClient implements ClientModInitializer {
             int visibleX = Math.min(HALF, (width / 2) / mapZoom);
             int visibleY = Math.min(HALF, (height / 2) / mapZoom);
             for (int y = -visibleY; y <= visibleY; y++) {
-                for (int x = -visibleX; x <= visibleX; x++) {
-                    int xx = cx + x * mapZoom, yy = cy + y * mapZoom;
-                    g.fill(xx, yy, xx + mapZoom, yy + mapZoom, terrain[HALF + y][HALF + x]);
+                int runStart = -visibleX;
+                int lastColor = Integer.MIN_VALUE;
+                for (int x = -visibleX; x <= visibleX + 1; x++) {
+                    int color = x > visibleX ? Integer.MIN_VALUE : terrain[HALF + y][HALF + x];
+                    if (color != lastColor) {
+                        if (lastColor != Integer.MIN_VALUE) {
+                            int xx = cx + runStart * mapZoom;
+                            int yy = cy + y * mapZoom;
+                            g.fill(xx, yy, cx + x * mapZoom, yy + mapZoom, lastColor);
+                        }
+                        runStart = x;
+                        lastColor = color;
+                    }
                 }
             }
             drawMarkers(g, mc, cx, cy, mapZoom, Math.min(width, height) / 2, false);
