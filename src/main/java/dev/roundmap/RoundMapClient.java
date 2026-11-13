@@ -2,6 +2,12 @@ package dev.roundmap;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.util.Base64;
+import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
@@ -31,7 +37,37 @@ public final class RoundMapClient implements ClientModInitializer {
     private static int miniSize = 48, mapZoom = 3;
     private record Marker(int x, int z, String dimension, String name) {}
 
+    private static final Path WAYPOINT_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-waypoints.txt");
+
+    private static void loadMarkers() {
+        markers.clear();
+        if (!Files.isRegularFile(WAYPOINT_FILE)) return;
+        try {
+            for (String line : Files.readAllLines(WAYPOINT_FILE, StandardCharsets.UTF_8)) {
+                String[] parts = line.split(";", 4);
+                if (parts.length != 4) continue;
+                try {
+                    markers.add(new Marker(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                        new String(Base64.getDecoder().decode(parts[2]), StandardCharsets.UTF_8),
+                        new String(Base64.getDecoder().decode(parts[3]), StandardCharsets.UTF_8)));
+                } catch (IllegalArgumentException ignored) { }
+            }
+        } catch (IOException e) { System.err.println("[RoundMap] Cannot read waypoints: " + e); }
+    }
+
+    private static void saveMarkers() {
+        List<String> lines = new ArrayList<>();
+        for (Marker m : markers) lines.add(m.x() + ";" + m.z() + ";" +
+            Base64.getEncoder().encodeToString(m.dimension().getBytes(StandardCharsets.UTF_8)) + ";" +
+            Base64.getEncoder().encodeToString(m.name().getBytes(StandardCharsets.UTF_8)));
+        try {
+            Files.createDirectories(WAYPOINT_FILE.getParent());
+            Files.write(WAYPOINT_FILE, lines, StandardCharsets.UTF_8);
+        } catch (IOException e) { System.err.println("[RoundMap] Cannot save waypoints: " + e); }
+    }
+
     @Override public void onInitializeClient() {
+        loadMarkers();
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
             Identifier.fromNamespaceAndPath("roundmap", "minimap"),
             (graphics, tickCounter) -> hud(graphics));
@@ -145,7 +181,7 @@ public final class RoundMapClient implements ClientModInitializer {
 
     private static final class MapScreen extends Screen {
         private double panX, panZ, oldX, oldY;
-        private boolean wasDragging, lastClose;
+        private boolean wasDragging, lastClose, lastPlus, lastMinus;
         private MapScreen() { super(Component.literal("RoundMap")); lastClose = true; }
         @Override protected void init() {
             addRenderableWidget(Button.builder(Component.literal("Settings"), b ->
@@ -156,7 +192,7 @@ public final class RoundMapClient implements ClientModInitializer {
             if (mc.level == null || mc.player == null) return;
             long handle = mc.getWindow().handle();
             boolean dragging = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
-            if (dragging && wasDragging) {
+            if (dragging && wasDragging && oldY > 35 && mouseY > 35) {
                 panX -= (mouseX - oldX) / (double)mapZoom;
                 panZ -= (mouseY - oldY) / (double)mapZoom;
             }
@@ -190,7 +226,7 @@ public final class RoundMapClient implements ClientModInitializer {
             int playerX = cx + Math.round((mc.player.getBlockX() - centerX) * mapZoom);
             int playerZ = cy + Math.round((mc.player.getBlockZ() - centerZ) * mapZoom);
             g.fill(playerX - 3, playerZ - 3, playerX + 4, playerZ + 4, 0xFFFF5555);
-            g.drawCenteredString(font, "RoundMap | drag: pan | +/-: zoom | ESC: close", width / 2, 12, -1);
+            g.drawCenteredString(font, "RoundMap | drag: pan | wheel or +/-: zoom | ESC: close", width / 2, 12, -1);
             g.drawCenteredString(font, "X " + targetX + "  Z " + targetZ, width / 2, height - 16, -1);
             super.render(g, mouseX, mouseY, delta);
             boolean close = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_M) == GLFW.GLFW_PRESS;
@@ -198,8 +234,15 @@ public final class RoundMapClient implements ClientModInitializer {
             lastClose = close;
             boolean plus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_EQUAL) == GLFW.GLFW_PRESS;
             boolean minus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_MINUS) == GLFW.GLFW_PRESS;
-            if (plus && mapZoom < 8) mapZoom++;
-            if (minus && mapZoom > 1) mapZoom--;
+            if (plus && !lastPlus && mapZoom < 8) mapZoom++;
+            if (minus && !lastMinus && mapZoom > 1) mapZoom--;
+            lastPlus = plus;
+            lastMinus = minus;
+        }
+        @Override public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
+            if (vertical > 0) mapZoom = Math.min(8, mapZoom + 1);
+            if (vertical < 0) mapZoom = Math.max(1, mapZoom - 1);
+            return true;
         }
     }
 
@@ -239,7 +282,10 @@ public final class RoundMapClient implements ClientModInitializer {
             setInitialFocus(name);
             addRenderableWidget(Button.builder(Component.literal("Save waypoint"), b -> {
                 String label = name.getValue().trim();
-                if (!label.isEmpty()) markers.add(new Marker(x, z, dimension, label));
+                if (!label.isEmpty()) {
+                    markers.add(new Marker(x, z, dimension, label));
+                    saveMarkers();
+                }
                 minecraft.setScreen(null);
             }).bounds(width / 2 - 100, height / 2 + 5, 200, 20).build());
         }
