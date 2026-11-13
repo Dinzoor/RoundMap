@@ -74,6 +74,20 @@ final class RoundMapAtlas {
     }
 
     static void forceRefresh() { lastChunkX = Integer.MIN_VALUE; }
+    static void onResourcePackReload() {
+        // Server resource packs can change the appearance of mapped states.
+        // Repaint chunks as they come into view without deleting saved terrain.
+        for (Tile t : tiles.values()) t.stage = 0;
+        nearbyCoarse.clear();
+        nearbyFine.clear();
+        coarseQueue.clear();
+        fineQueue.clear();
+        active = Long.MIN_VALUE;
+        forceRefresh();
+        revision++;
+        dirty = true;
+        RoundMapTextures.invalidate();
+    }
     static int revision() { return revision; }
     static int exploredChunks() {
         int explored = 0;
@@ -271,9 +285,13 @@ final class RoundMapAtlas {
             }
             MapColor mapColor = state.getMapColor(mc.level, ground);
             if (mapColor == MapColor.NONE) {
+                // A resource-pack model may define the full appearance of
+                // a block even if vanilla MapColor is NONE. Try its top face.
+                int modelColor = RoundMapBlockPalette.color(mc, state, ground, 0);
+                boolean hasTexture = modelColor != 0;
                 // Ignore thin plants or other non-map-color blocks; use the
                 // underlying solid surface where possible.
-                for (int depth = 1; depth <= 6 && mapColor == MapColor.NONE; depth++) {
+                for (int depth = 1; depth <= 6 && mapColor == MapColor.NONE && !hasTexture; depth++) {
                     BlockPos lower = ground.below(depth);
                     BlockState candidate = mc.level.getBlockState(lower);
                     if (!candidate.isAir()) {
@@ -285,12 +303,13 @@ final class RoundMapAtlas {
                         }
                     }
                 }
-                if (mapColor == MapColor.NONE) {
+                if (mapColor == MapColor.NONE && !hasTexture) {
                     active = Long.MIN_VALUE;
                     continue;
                 }
             }
-            int color = mapColor.col | 0xFF000000;
+            int color = RoundMapBlockPalette.color(mc, state, ground,
+                mapColor == MapColor.NONE ? 0 : mapColor.col | 0xFF000000);
             // A lightweight biome-aware material palette. Capture only on the
             // client tick; no live biome queries happen while drawing the map.
             if (state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.MOSS_BLOCK)) {
@@ -382,7 +401,8 @@ final class RoundMapAtlas {
         nearbyFine.clear();
         coarseQueue.clear();
         fineQueue.clear();
-        active = Long.MIN_VALUE;
+        // Keep the currently progressing chunk: rescheduling every three
+        // seconds used to restart its 256 samples forever at low settings.
         // Explore near the player first so the high-resolution map appears
         // where they are standing; only then fill the distant rendered ring.
         // Every scan is restricted to chunks inside the view-distance circle.
@@ -400,8 +420,10 @@ final class RoundMapAtlas {
                     if (tile == null || tile.stage == 0) {
                         (near ? nearbyCoarse : coarseQueue).addLast(k);
                     }
-                    if (detailed && radius <= 4 && (tile == null || tile.stage < 2)) {
-                        (near ? nearbyFine : fineQueue).addLast(k);
+                    // Refine every visited chunk, not just a 4-chunk radius:
+                    // distant regions previously stayed coarse forever.
+                    if (detailed && (tile == null || tile.stage < 2)) {
+                        (radius <= 1 ? nearbyFine : fineQueue).addLast(k);
                     }
                 }
             }
