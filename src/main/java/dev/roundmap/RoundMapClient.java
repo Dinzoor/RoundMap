@@ -46,7 +46,9 @@ public final class RoundMapClient implements ClientModInitializer {
     private static Object lastWorld;
     private static KeyMapping mapKey, waypointKey, optionsKey, toggleKey, zoomInKey, zoomOutKey, listKey;
     private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
-    private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true, showWorldMarkers = true;
+    private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true, showWorldMarkers = true, showBiome = true;
+    private static String biomeLabel = "";
+    private static long biomeRefreshAt;
     static int miniOpacity = 100;
     private static int worldMarkerDistance = 1500;
     static boolean brightFog = true;
@@ -69,6 +71,7 @@ public final class RoundMapClient implements ClientModInitializer {
             miniSize = Math.max(24, Math.min(120, miniSize));
             showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
             showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
+            showBiome = Boolean.parseBoolean(p.getProperty("biome", "true"));
             showCompass = Boolean.parseBoolean(p.getProperty("compass", "true"));
             showLabels = Boolean.parseBoolean(p.getProperty("labels", "true"));
             showWorldMarkers = Boolean.parseBoolean(p.getProperty("worldMarkers", "true"));
@@ -96,6 +99,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("zoom", Double.toString(miniZoom));
         p.setProperty("visible", Boolean.toString(showMini));
         p.setProperty("coords", Boolean.toString(showCoords));
+        p.setProperty("biome", Boolean.toString(showBiome));
         p.setProperty("compass", Boolean.toString(showCompass));
         p.setProperty("labels", Boolean.toString(showLabels));
         p.setProperty("worldMarkers", Boolean.toString(showWorldMarkers));
@@ -273,6 +277,16 @@ public final class RoundMapClient implements ClientModInitializer {
         if (showCoords) g.drawCenteredString(mc.font,
             "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(),
             cx, cy + miniSize + 8, -1);
+        if (showBiome) {
+            long now = System.nanoTime();
+            if (now > biomeRefreshAt) {
+                biomeRefreshAt = now + 1_000_000_000L;
+                biomeLabel = mc.level.getBiome(mc.player.blockPosition()).unwrapKey()
+                    .map(k -> k.location().getPath().replace('_', ' ')).orElse("unknown");
+            }
+            g.drawCenteredString(mc.font, "Биом: " + biomeLabel,
+                cx, cy + miniSize + (showCoords ? 19 : 8), 0xFFFFFFFF);
+        }
     }
 
     private static void drawMarkers(GuiGraphics g, Minecraft mc, int cx, int cy,
@@ -445,6 +459,8 @@ public final class RoundMapClient implements ClientModInitializer {
                     () -> { miniZoom = miniZoom >= 4.0 ? 1.0 : miniZoom + 0.5; savePosition(); });
                 option(right, top + step, cw, "Непрозрачность: " + miniOpacity + "%",
                     () -> { miniOpacity = miniOpacity <= 25 ? 100 : miniOpacity - 25; RoundMapTextures.invalidate(); savePosition(); });
+                option(right, top + 3 * step, cw, "Биом: " + (showBiome ? "Вкл" : "Выкл"),
+                    () -> { showBiome = !showBiome; savePosition(); });
                 link(right, top + 2 * step, cw, "Переместить мышью",
                     () -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))));
             } else if (tab == 1) {
