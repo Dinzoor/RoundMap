@@ -364,11 +364,11 @@ public final class RoundMapClient implements ClientModInitializer {
         double yaw = Math.toRadians(mc.player.getYRot());
         double fx = -Math.sin(yaw), fy = Math.cos(yaw);
         double sx = fy, sy = -fx;
-        // 25% of the previous size on both the minimap and fullscreen map.
-        arrowShape(g, cx + 1, cy + 1, fx, fy, sx, sy, 0.3125, 0xFF131923);
-        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.285, 0xFF151619);
-        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.25, 0xFFFF4848);
-        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.1825, 0xFFFFFFFF);
+        // Balanced size: twice the tiny alpha.6 pointer, half its former size.
+        arrowShape(g, cx + 1, cy + 1, fx, fy, sx, sy, 0.625, 0xFF131923);
+        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.57, 0xFF151619);
+        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.50, 0xFFFF4848);
+        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.365, 0xFFFFFFFF);
     }
 
     private static void arrowShape(GuiGraphics g, int cx, int cy,
