@@ -138,6 +138,7 @@ public final class RoundMapClient implements ClientModInitializer {
         zoomOutKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.zoom_out", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
         listKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.list", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            RoundMapAtlas.tick(client);
             if (client.player == null || client.level == null || client.screen != null) return;
             if (mapKey.consumeClick()) client.setScreen(new MapScreen());
             else if (waypointKey.consumeClick()) client.setScreen(new NameScreen(client.player.getBlockX(), client.player.getBlockZ(), client.level.dimension().toString()));
@@ -199,14 +200,6 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void hud(GuiGraphics g) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
-        int px = mc.player.getBlockX(), pz = mc.player.getBlockZ();
-        if (lastWorld != mc.level || lastPlayerX == Integer.MIN_VALUE ||
-            Math.abs(px - lastPlayerX) >= 24 || Math.abs(pz - lastPlayerZ) >= 24) {
-            lastPlayerX = px;
-            lastPlayerZ = pz;
-            recenter(mc, px, pz);
-        }
-        if (showMini && !mc.options.hideGui) sample(mc);
         if (mc.options.hideGui) return;
         if (showWorldMarkers && mc.screen == null) drawWorldMarkers(g, mc);
         if (showMini) drawMini(g, mc, miniCenterX(g.guiWidth()), miniCenterY(g.guiHeight()));
@@ -241,36 +234,24 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     private static void drawMini(GuiGraphics g, Minecraft mc, int cx, int cy) {
-        // Draw horizontal color runs instead of one GPU rectangle per pixel.
-        for (int y = -miniSize; y <= miniSize; y += 2) {
-            int gy = HALF + (int)Math.round(y * HALF / (miniSize * miniZoom));
-            if (gy < 0 || gy >= GRID) continue;
-            int extent = (int)Math.sqrt(miniSize * miniSize - y * y);
-            int runStart = -extent;
-            int lastColor = Integer.MIN_VALUE;
-            for (int x = -extent; x <= extent + 2; x += 2) {
-                int gx = HALF + (int)Math.round(x * HALF / (miniSize * miniZoom));
-                int color = x > extent || gx < 0 || gx >= GRID ? Integer.MIN_VALUE : terrain[gy][gx];
-                if (color != lastColor) {
-                    if (lastColor != Integer.MIN_VALUE)
-                        g.fill(cx + runStart, cy + y, cx + x, cy + y + 2, lastColor);
-                    runStart = x;
-                    lastColor = color;
-                }
-            }
-        }
+        RoundMapTextures.minimap(g, cx, cy, miniSize, miniZoom,
+            mc.player.getBlockX(), mc.player.getBlockZ());
         outline(g, cx, cy, miniSize);
-        drawMarkers(g, mc, cx, cy, (float)(miniSize * miniZoom / HALF), miniSize, true);
+        drawMarkers(g, mc, cx, cy, (float)(miniSize * miniZoom / HALF), miniSize,
+            true, mc.player.getBlockX(), mc.player.getBlockZ());
         pointer(g, mc, cx, cy);
         if (showCompass) g.drawCenteredString(mc.font, "N", cx, cy - miniSize - 11, -1);
-        if (showCoords) g.drawCenteredString(mc.font, "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(), cx, cy + miniSize + 8, -1);
+        if (showCoords) g.drawCenteredString(mc.font,
+            "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(),
+            cx, cy + miniSize + 8, -1);
     }
 
-    private static void drawMarkers(GuiGraphics g, Minecraft mc, int cx, int cy, float scale, int radius, boolean circle) {
+    private static void drawMarkers(GuiGraphics g, Minecraft mc, int cx, int cy,
+            float scale, int radius, boolean circle, int worldX, int worldZ) {
         for (Marker marker : markers) {
             if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
-            int dx = Math.round((marker.x() - centerX) * scale);
-            int dz = Math.round((marker.z() - centerZ) * scale);
+            int dx = Math.round((marker.x() - worldX) * scale);
+            int dz = Math.round((marker.z() - worldZ) * scale);
             if (Math.abs(dx) >= radius - 4 || Math.abs(dz) >= radius - 4) continue;
             if (circle && dx * dx + dz * dz >= (radius - 4) * (radius - 4)) continue;
             g.fill(cx + dx - 2, cy + dz - 2, cx + dx + 3, cy + dz + 3, 0xFFFFD640);
@@ -297,23 +278,45 @@ public final class RoundMapClient implements ClientModInitializer {
 
     private static final class MapScreen extends Screen {
         private double panX, panZ, oldX, oldY;
-        private boolean wasDragging, lastPlus, lastMinus;
+        private boolean wasDragging, wasRight, lastPlus, lastMinus;
         private MapScreen() { super(Component.literal("RoundMap")); }
         private MapScreen(int x, int z) {
             this();
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player != null) { panX = x - mc.player.getBlockX(); panZ = z - mc.player.getBlockZ(); }
+            if (mc.player != null) {
+                panX = x - mc.player.getBlockX();
+                panZ = z - mc.player.getBlockZ();
+            }
         }
+        private void zoom(int amount) { mapZoom = Math.max(1, Math.min(10, mapZoom + amount)); }
         @Override protected void init() {
-            addRenderableWidget(Button.builder(Component.literal("Settings"), b ->
-                minecraft.setScreen(new OptionsScreen())).bounds(width - 95, 8, 85, 20).build());
+            int y = 8;
+            addRenderableWidget(Button.builder(Component.literal("Точки"), b ->
+                minecraft.setScreen(new WaypointListScreen(this, 0)))
+                .bounds(width - 215, y, 96, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Настройки"), b ->
+                minecraft.setScreen(new OptionsScreen(this)))
+                .bounds(width - 113, y, 106, 20).build());
+            int rx = width - 31, cy = height / 2;
+            addRenderableWidget(Button.builder(Component.literal("+"), b -> zoom(1))
+                .bounds(rx, cy - 55, 24, 24).build());
+            addRenderableWidget(Button.builder(Component.literal("-"), b -> zoom(-1))
+                .bounds(rx, cy - 25, 24, 24).build());
+            addRenderableWidget(Button.builder(Component.literal("C"), b -> {
+                panX = 0; panZ = 0;
+            }).bounds(rx, cy + 5, 24, 24).build());
+            addRenderableWidget(Button.builder(Component.literal("•"), b -> {
+                int x = minecraft.player.getBlockX() + (int)Math.round(panX);
+                int z = minecraft.player.getBlockZ() + (int)Math.round(panZ);
+                minecraft.setScreen(new NameScreen(x, z, minecraft.level.dimension().toString(), this));
+            }).bounds(rx, cy + 35, 24, 24).build());
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
             Minecraft mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) return;
             long handle = mc.getWindow().handle();
             boolean dragging = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
-            if (dragging && wasDragging && oldY > 35 && mouseY > 35) {
+            if (dragging && wasDragging && oldY > 35 && mouseY > 35 && mouseX < width - 38) {
                 panX -= (mouseX - oldX) / (double)mapZoom;
                 panZ -= (mouseY - oldY) / (double)mapZoom;
             }
@@ -321,49 +324,43 @@ public final class RoundMapClient implements ClientModInitializer {
             oldX = mouseX; oldY = mouseY;
             int targetX = mc.player.getBlockX() + (int)Math.round(panX);
             int targetZ = mc.player.getBlockZ() + (int)Math.round(panZ);
-            recenter(mc, targetX, targetZ);
-            sample(mc);
-            g.fill(0, 0, width, height, 0xEF171C23);
+            RoundMapTextures.fullscreen(g, width, height, targetX, targetZ, mapZoom);
             int cx = width / 2, cy = height / 2;
-            int visibleX = Math.min(HALF, (width / 2) / mapZoom);
-            int visibleY = Math.min(HALF, (height / 2) / mapZoom);
-            for (int y = -visibleY; y <= visibleY; y++) {
-                int runStart = -visibleX;
-                int lastColor = Integer.MIN_VALUE;
-                for (int x = -visibleX; x <= visibleX + 1; x++) {
-                    int color = x > visibleX ? Integer.MIN_VALUE : terrain[HALF + y][HALF + x];
-                    if (color != lastColor) {
-                        if (lastColor != Integer.MIN_VALUE) {
-                            int xx = cx + runStart * mapZoom;
-                            int yy = cy + y * mapZoom;
-                            g.fill(xx, yy, cx + x * mapZoom, yy + mapZoom, lastColor);
-                        }
-                        runStart = x;
-                        lastColor = color;
-                    }
-                }
-            }
-            drawMarkers(g, mc, cx, cy, mapZoom, Math.min(width, height) / 2, false);
-            int playerX = cx + Math.round((mc.player.getBlockX() - centerX) * mapZoom);
-            int playerZ = cy + Math.round((mc.player.getBlockZ() - centerZ) * mapZoom);
-            g.fill(playerX - 3, playerZ - 3, playerX + 4, playerZ + 4, 0xFFFF5555);
-            g.drawCenteredString(font, "RoundMap | drag: pan | wheel or +/-: zoom | ESC: close", width / 2, 12, -1);
-            g.drawCenteredString(font, "X " + targetX + "  Z " + targetZ, width / 2, height - 16, -1);
+            drawMarkers(g, mc, cx, cy, mapZoom, Math.min(width, height) / 2,
+                false, targetX, targetZ);
+            int playerX = cx + (int)Math.round((mc.player.getBlockX() - targetX) * mapZoom);
+            int playerZ = cy + (int)Math.round((mc.player.getBlockZ() - targetZ) * mapZoom);
+            if (playerX > 0 && playerX < width && playerZ > 34 && playerZ < height)
+                g.fill(playerX - 3, playerZ - 3, playerX + 4, playerZ + 4, 0xFFFF5555);
+            g.fill(0, 0, width, 35, 0xB018222C);
+            g.drawString(font, "RoundMap  •  Изучено чанков: " + RoundMapAtlas.exploredChunks(),
+                10, 12, 0xFFFFFFFF);
+            g.fill(0, height - 25, width, height, 0xB018222C);
+            int hoveredX = targetX + (int)Math.round((mouseX - cx) / (double)mapZoom);
+            int hoveredZ = targetZ + (int)Math.round((mouseY - cy) / (double)mapZoom);
+            g.drawString(font, "ЛКМ: сдвиг   Колесо: масштаб   ПКМ: добавить точку   M: закрыть",
+                8, height - 17, 0xFFE3E6EB);
+            g.drawString(font, "X " + hoveredX + " Z " + hoveredZ,
+                Math.max(0, width - 140), height - 17, 0xFFFFFFFF);
             super.render(g, mouseX, mouseY, delta);
+            boolean right = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS;
+            if (right && !wasRight && mouseY > 35 && mouseY < height - 25 && mouseX < width - 38) {
+                minecraft.setScreen(new NameScreen(hoveredX, hoveredZ, mc.level.dimension().toString(), this));
+            }
+            wasRight = right;
             boolean plus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_EQUAL) == GLFW.GLFW_PRESS;
             boolean minus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_MINUS) == GLFW.GLFW_PRESS;
-            if (plus && !lastPlus && mapZoom < 8) mapZoom++;
-            if (minus && !lastMinus && mapZoom > 1) mapZoom--;
-            lastPlus = plus;
-            lastMinus = minus;
+            if (plus && !lastPlus) zoom(1);
+            if (minus && !lastMinus) zoom(-1);
+            lastPlus = plus; lastMinus = minus;
         }
         @Override public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
             if (mapKey.matches(event)) { minecraft.setScreen(null); return true; }
             return super.keyPressed(event);
         }
         @Override public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
-            if (vertical > 0) mapZoom = Math.min(8, mapZoom + 1);
-            if (vertical < 0) mapZoom = Math.max(1, mapZoom - 1);
+            if (vertical > 0) zoom(1);
+            if (vertical < 0) zoom(-1);
             return true;
         }
     }
@@ -532,9 +529,12 @@ public final class RoundMapClient implements ClientModInitializer {
         private EditBox name;
         private final int x, z;
         private final String dimension;
-        private NameScreen(int x, int z, String dimension) {
+        private final Screen parent;
+        private NameScreen(int x, int z, String dimension) { this(x, z, dimension, null); }
+        private NameScreen(int x, int z, String dimension, Screen parent) {
             super(Component.literal("New waypoint"));
             this.x = x; this.z = z; this.dimension = dimension;
+            this.parent = parent;
         }
         @Override protected void init() {
             name = new EditBox(font, width / 2 - 100, height / 2 - 25, 200, 20,
@@ -549,7 +549,7 @@ public final class RoundMapClient implements ClientModInitializer {
                     markers.add(new Marker(x, z, dimension, label));
                     saveMarkers();
                 }
-                minecraft.setScreen(null);
+                minecraft.setScreen(parent);
             }).bounds(width / 2 - 100, height / 2 + 5, 200, 20).build());
         }
     }
