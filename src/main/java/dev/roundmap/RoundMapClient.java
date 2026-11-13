@@ -143,13 +143,27 @@ public final class RoundMapClient implements ClientModInitializer {
         }
     }
 
-    private static final Path WAYPOINT_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-waypoints.txt");
+    // Previous global file is intentionally left untouched: it may contain
+    // waypoints belonging to several different worlds.
+    private static final Path LEGACY_WAYPOINT_FILE = FabricLoader.getInstance().getConfigDir()
+        .resolve("roundmap-waypoints.txt");
+    private static Path waypointFile;
+    private static String markersWorldKey = "";
+
+    private static void syncMarkers(Minecraft mc) {
+        String newKey = RoundMapWorldIdentity.key(mc);
+        if (markersWorldKey.equals(newKey)) return;
+        markersWorldKey = newKey;
+        markers.clear();
+        waypointFile = newKey.isEmpty() ? null : RoundMapWorldIdentity.waypointPath(newKey);
+        if (waypointFile != null) loadMarkers();
+    }
 
     private static void loadMarkers() {
         markers.clear();
-        if (!Files.isRegularFile(WAYPOINT_FILE)) return;
+        if (waypointFile == null || !Files.isRegularFile(waypointFile)) return;
         try {
-            for (String line : Files.readAllLines(WAYPOINT_FILE, StandardCharsets.UTF_8)) {
+            for (String line : Files.readAllLines(waypointFile, StandardCharsets.UTF_8)) {
                 String[] parts = line.split(";", 6);
                 try {
                     if (parts.length == 4) {
@@ -170,14 +184,15 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     private static void saveMarkers() {
+        if (waypointFile == null) return;
         List<String> lines = new ArrayList<>();
         for (Marker m : markers) lines.add(m.x() + ";" + m.y() + ";" + m.z() + ";" +
             Base64.getEncoder().encodeToString(m.dimension().getBytes(StandardCharsets.UTF_8)) + ";" +
             Base64.getEncoder().encodeToString(m.name().getBytes(StandardCharsets.UTF_8)) + ";" +
             Integer.toHexString(m.color()));
         try {
-            Files.createDirectories(WAYPOINT_FILE.getParent());
-            Files.write(WAYPOINT_FILE, lines, StandardCharsets.UTF_8);
+            Files.createDirectories(waypointFile.getParent());
+            Files.write(waypointFile, lines, StandardCharsets.UTF_8);
         } catch (IOException e) { System.err.println("[RoundMap] Cannot save waypoints: " + e); }
     }
 
@@ -190,6 +205,7 @@ public final class RoundMapClient implements ClientModInitializer {
         zoomOutKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.zoom_out", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
         listKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.list", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            syncMarkers(client);
             RoundMapAtlas.tick(client);
             if (client.player == null || client.level == null || client.screen != null) return;
             if (mapKey.consumeClick()) client.setScreen(new MapScreen());
@@ -200,7 +216,6 @@ public final class RoundMapClient implements ClientModInitializer {
             else if (zoomInKey.consumeClick()) { miniZoom = Math.min(4.0, miniZoom + 0.5); savePosition(); }
             else if (zoomOutKey.consumeClick()) { miniZoom = Math.max(1.0, miniZoom - 0.5); savePosition(); }
         });
-        loadMarkers();
         loadPosition();
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> RoundMapAtlas.shutdown());
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
