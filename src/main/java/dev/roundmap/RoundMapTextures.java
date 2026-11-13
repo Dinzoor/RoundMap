@@ -34,6 +34,7 @@ final class RoundMapTextures {
             width = w;
             height = h;
             centerX = Integer.MIN_VALUE;
+            updatedAt = 0;
             revision = -1;
             zoomKey = -1;
         }
