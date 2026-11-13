@@ -1,4 +1,4 @@
-# RoundMap — Fabric 1.21.11 (0.2.0 alpha)
+# RoundMap — Fabric 1.21.11 (0.2.0 alpha.3)
 
 Experimental client-side world map, built for Minecraft Java 1.21.11 and Fabric API.
 
@@ -21,8 +21,9 @@ GitHub Actions also builds the JAR; see **Actions → Build Fabric JAR → Artif
 
 ## Data and performance
 - Position, UI toggles, zoom and radar settings: `config/roundmap-position.properties`
-- Named waypoints: `config/roundmap-waypoints.txt`
-- Explored atlas: `config/roundmap/explored/*.dat.gz` (world-specific).
+- Named waypoints: `config/roundmap/waypoints/v2/<sha256>.txt` (separate per save/server/dimension)
+- Explored atlas: `config/roundmap/explored/v2/<sha256>.dat.gz` (separate per save/server/dimension).
+- Old shared map files and `config/roundmap-waypoints.txt` are left intact but **not imported automatically**, because they may already contain data from different worlds. Existing explored terrain must be rediscovered once in alpha.3.
 - Lower **Вид → Сканирование** to 2 or 4 blocks/tick for lower overhead.
 - Switch **Вид → Качество** to **Быстро** for coarse but faster exploration.
 
