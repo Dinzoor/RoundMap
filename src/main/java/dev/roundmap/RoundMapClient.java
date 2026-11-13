@@ -11,6 +11,8 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -71,6 +73,13 @@ public final class RoundMapClient implements ClientModInitializer {
 
     @Override public void onInitializeClient() {
         loadMarkers();
+        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
+            if (screen instanceof net.minecraft.client.gui.screens.options.OptionsScreen) {
+                Screens.getButtons(screen).add(Button.builder(Component.literal("RoundMap settings"),
+                    button -> client.setScreen(new OptionsScreen(screen)))
+                    .bounds(Math.max(4, scaledWidth - 130), 6, 124, 20).build());
+            }
+        });
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
             Identifier.fromNamespaceAndPath("roundmap", "minimap"),
             (graphics, tickCounter) -> hud(graphics));
@@ -257,21 +266,27 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     private static final class OptionsScreen extends Screen {
-        private OptionsScreen() { super(Component.literal("RoundMap settings")); }
+        private final Screen parent;
+        private OptionsScreen() { this(null); }
+        private OptionsScreen(Screen parent) {
+            super(Component.literal("RoundMap settings"));
+            this.parent = parent;
+        }
+        private void returnToParent() { minecraft.setScreen(parent); }
         @Override protected void init() {
             int x = width / 2 - 105, y = height / 2 - 65;
             addRenderableWidget(Button.builder(Component.literal("Minimap: " + (showMini ? "ON" : "OFF")), b -> {
-                showMini = !showMini; minecraft.setScreen(new OptionsScreen());
+                showMini = !showMini; minecraft.setScreen(new OptionsScreen(parent));
             }).bounds(x, y, 210, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Waypoint labels: " + (showLabels ? "ON" : "OFF")), b -> {
-                showLabels = !showLabels; minecraft.setScreen(new OptionsScreen());
+                showLabels = !showLabels; minecraft.setScreen(new OptionsScreen(parent));
             }).bounds(x, y + 25, 210, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Minimap size: " + miniSize), b -> {
                 miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48;
-                minecraft.setScreen(new OptionsScreen());
+                minecraft.setScreen(new OptionsScreen(parent));
             }).bounds(x, y + 50, 210, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Done"), b ->
-                minecraft.setScreen(null)).bounds(x, y + 85, 210, 20).build());
+                returnToParent()).bounds(x, y + 85, 210, 20).build());
         }
     }
 
