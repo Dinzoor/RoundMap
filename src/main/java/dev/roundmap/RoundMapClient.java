@@ -130,7 +130,12 @@ public final class RoundMapClient implements ClientModInitializer {
         int r = Math.max(0, Math.min(miniSize + 18, height / 2));
         return Math.max(r, Math.min(height - r, miniY < 0 ? miniSize + 18 : (int)Math.round(miniY * height)));
     }
-    private record Marker(int x, int z, String dimension, String name) {}
+    private static final int[] MARKER_COLORS = {0xFFFFD640, 0xFFFF6666, 0xFF66CCFF, 0xFF77EE88, 0xFFCF88FF, 0xFFFFFFFF};
+    private record Marker(int x, int y, int z, String dimension, String name, int color) {
+        Marker(int x, int z, String dimension, String name) {
+            this(x, 64, z, dimension, name, MARKER_COLORS[0]);
+        }
+    }
 
     private static final Path WAYPOINT_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-waypoints.txt");
 
@@ -139,12 +144,20 @@ public final class RoundMapClient implements ClientModInitializer {
         if (!Files.isRegularFile(WAYPOINT_FILE)) return;
         try {
             for (String line : Files.readAllLines(WAYPOINT_FILE, StandardCharsets.UTF_8)) {
-                String[] parts = line.split(";", 4);
-                if (parts.length != 4) continue;
+                String[] parts = line.split(";", 6);
                 try {
-                    markers.add(new Marker(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
-                        new String(Base64.getDecoder().decode(parts[2]), StandardCharsets.UTF_8),
-                        new String(Base64.getDecoder().decode(parts[3]), StandardCharsets.UTF_8)));
+                    if (parts.length == 4) {
+                        // Legacy x;z;dimension;name records remain readable.
+                        markers.add(new Marker(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                            new String(Base64.getDecoder().decode(parts[2]), StandardCharsets.UTF_8),
+                            new String(Base64.getDecoder().decode(parts[3]), StandardCharsets.UTF_8)));
+                    } else if (parts.length == 6) {
+                        markers.add(new Marker(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                            Integer.parseInt(parts[2]),
+                            new String(Base64.getDecoder().decode(parts[3]), StandardCharsets.UTF_8),
+                            new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8),
+                            (int)Long.parseLong(parts[5], 16)));
+                    }
                 } catch (IllegalArgumentException ignored) { }
             }
         } catch (IOException e) { System.err.println("[RoundMap] Cannot read waypoints: " + e); }
@@ -152,9 +165,10 @@ public final class RoundMapClient implements ClientModInitializer {
 
     private static void saveMarkers() {
         List<String> lines = new ArrayList<>();
-        for (Marker m : markers) lines.add(m.x() + ";" + m.z() + ";" +
+        for (Marker m : markers) lines.add(m.x() + ";" + m.y() + ";" + m.z() + ";" +
             Base64.getEncoder().encodeToString(m.dimension().getBytes(StandardCharsets.UTF_8)) + ";" +
-            Base64.getEncoder().encodeToString(m.name().getBytes(StandardCharsets.UTF_8)));
+            Base64.getEncoder().encodeToString(m.name().getBytes(StandardCharsets.UTF_8)) + ";" +
+            Integer.toHexString(m.color()));
         try {
             Files.createDirectories(WAYPOINT_FILE.getParent());
             Files.write(WAYPOINT_FILE, lines, StandardCharsets.UTF_8);
@@ -240,16 +254,23 @@ public final class RoundMapClient implements ClientModInitializer {
 
 
     // Lightweight screen-space waypoint labels: no block scanning or extra world rendering.
+    /**
+     * Project named world markers using horizontal bearing, camera pitch and
+     * elevation. It is a lightweight directional overlay, not a 3-D beam.
+     */
     private static void drawWorldMarkers(GuiGraphics g, Minecraft mc) {
         double yaw = Math.toRadians(mc.player.getYRot());
+        double pitch = Math.toRadians(mc.player.getXRot());
         double forwardX = -Math.sin(yaw), forwardZ = Math.cos(yaw);
         double rightX = forwardZ, rightZ = -forwardX;
         int w = g.guiWidth(), h = g.guiHeight();
         for (Marker marker : markers) {
             if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
             double dx = marker.x() + 0.5 - mc.player.getX();
+            double dy = marker.y() + 0.5 - (mc.player.getY() + 1.62);
             double dz = marker.z() + 0.5 - mc.player.getZ();
-            double distance = Math.hypot(dx, dz);
+            double distance2d = Math.hypot(dx, dz);
+            double distance = Math.hypot(distance2d, dy);
             if (distance < 3 || distance > worldMarkerDistance) continue;
             double forward = dx * forwardX + dz * forwardZ;
             if (forward <= 0) continue;
@@ -257,11 +278,13 @@ public final class RoundMapClient implements ClientModInitializer {
             double angle = Math.atan2(side, forward);
             if (Math.abs(angle) > Math.toRadians(55)) continue;
             int sx = w / 2 + (int)Math.round(angle / Math.toRadians(55) * w * 0.43);
-            int sy = h / 3;
+            double elevation = Math.atan2(dy, distance2d);
+            int sy = h / 2 - (int)Math.round((elevation + pitch) / Math.toRadians(55) * h * 0.5);
+            if (sy < 40 || sy > h - 38) continue;
             String label = marker.name() + " - " + (int)Math.round(distance) + " m";
             int tw = mc.font.width(label);
             g.fill(sx - tw / 2 - 5, sy - 16, sx + tw / 2 + 5, sy + 4, 0x990B111A);
-            g.fill(sx - 3, sy - 22, sx + 4, sy - 15, 0xFFFFD640);
+            g.fill(sx - 3, sy - 22, sx + 4, sy - 15, marker.color());
             g.drawCenteredString(mc.font, label, sx, sy - 12, 0xFFFFFFFF);
         }
     }
@@ -301,7 +324,7 @@ public final class RoundMapClient implements ClientModInitializer {
             int limitY = circle ? radius - 4 : g.guiHeight() / 2 - 4;
             if (Math.abs(dx) >= limitX || Math.abs(dz) >= limitY) continue;
             if (circle && dx * dx + dz * dz >= (radius - 4) * (radius - 4)) continue;
-            g.fill(cx + dx - 2, cy + dz - 2, cx + dx + 3, cy + dz + 3, 0xFFFFD640);
+            g.fill(cx + dx - 2, cy + dz - 2, cx + dx + 3, cy + dz + 3, marker.color());
             if (showLabels) g.drawCenteredString(mc.font, marker.name(), cx + dx, cy + dz - 14, -1);
         }
     }
@@ -537,7 +560,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 final Marker marker = markers.get(i);
                 final int index = i;
                 int row = i - start;
-                addRenderableWidget(Button.builder(Component.literal(marker.name() + " [" + marker.x() + ", " + marker.z() + "]"),
+                addRenderableWidget(Button.builder(Component.literal(marker.name() + " [" + marker.x() + ", " + marker.y() + ", " + marker.z() + "]"),
                     b -> minecraft.setScreen(new MapScreen(marker.x(), marker.z())))
                     .bounds(x, y + row * 26, 245, 20).build());
                 addRenderableWidget(Button.builder(Component.literal("X"), b -> {
@@ -621,31 +644,50 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     private static final class NameScreen extends Screen {
-        private EditBox name;
+        private EditBox name, altitude;
         private final int x, z;
         private final String dimension;
         private final Screen parent;
+        private int colorIndex = 0;
         private NameScreen(int x, int z, String dimension) { this(x, z, dimension, null); }
         private NameScreen(int x, int z, String dimension, Screen parent) {
-            super(Component.literal("New waypoint"));
+            super(Component.literal("Новая точка"));
             this.x = x; this.z = z; this.dimension = dimension;
             this.parent = parent;
         }
         @Override protected void init() {
-            name = new EditBox(font, width / 2 - 100, height / 2 - 25, 200, 20,
-                Component.literal("Waypoint name"));
+            int left = width / 2 - 120, top = height / 2 - 57;
+            name = new EditBox(font, left, top, 240, 20, Component.literal("Название"));
             name.setMaxLength(40);
-            name.setValue("Waypoint " + (markers.size() + 1));
+            name.setValue("Точка " + (markers.size() + 1));
             addRenderableWidget(name);
             setInitialFocus(name);
-            addRenderableWidget(Button.builder(Component.literal("Save waypoint"), b -> {
+            altitude = new EditBox(font, left, top + 26, 110, 20, Component.literal("Высота Y"));
+            altitude.setMaxLength(6);
+            altitude.setValue(Integer.toString(minecraft.player == null ? 64 : minecraft.player.getBlockY()));
+            addRenderableWidget(altitude);
+            addRenderableWidget(Button.builder(Component.literal("Цвет точки"), b -> {
+                colorIndex = (colorIndex + 1) % MARKER_COLORS.length;
+            }).bounds(left + 120, top + 26, 120, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Сохранить точку"), b -> {
                 String label = name.getValue().trim();
                 if (!label.isEmpty()) {
-                    markers.add(new Marker(x, z, dimension, label));
+                    int y = minecraft.player == null ? 64 : minecraft.player.getBlockY();
+                    try { y = Integer.parseInt(altitude.getValue().trim()); }
+                    catch (NumberFormatException ignored) { }
+                    markers.add(new Marker(x, y, z, dimension, label, MARKER_COLORS[colorIndex]));
                     saveMarkers();
                 }
                 minecraft.setScreen(parent);
-            }).bounds(width / 2 - 100, height / 2 + 5, 200, 20).build());
+            }).bounds(left, top + 54, 240, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Отмена"), b ->
+                minecraft.setScreen(parent)).bounds(left, top + 80, 240, 20).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            super.render(g, mouseX, mouseY, delta);
+            int left = width / 2 - 120, top = height / 2 - 57;
+            g.fill(left + 224, top + 29, left + 237, top + 43, MARKER_COLORS[colorIndex]);
+            g.drawCenteredString(font, "X " + x + " Z " + z, width / 2, top - 16, 0xFFFFFFFF);
         }
     }
 }
