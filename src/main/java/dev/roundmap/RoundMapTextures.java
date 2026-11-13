@@ -29,7 +29,8 @@ final class RoundMapTextures {
             if (id != null) Minecraft.getInstance().getTextureManager().release(id);
             pixels = new NativeImage(w, h, false);
             texture = new DynamicTexture(() -> "RoundMap " + name, pixels);
-            id = Minecraft.getInstance().getTextureManager().register(name, texture);
+            id = Identifier.fromNamespaceAndPath("roundmap", "dynamic/" + name);
+            Minecraft.getInstance().getTextureManager().register(id, texture);
             width = w;
             height = h;
             centerX = Integer.MIN_VALUE;
