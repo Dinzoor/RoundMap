@@ -75,9 +75,9 @@ final class RoundMapAtlas {
 
     static void forceRefresh() { lastChunkX = Integer.MIN_VALUE; }
     static void onResourcePackReload() {
-        // Server resource packs can change the appearance of mapped states.
-        // Repaint chunks as they come into view without deleting saved terrain.
-        for (Tile t : tiles.values()) t.stage = 0;
+        // Preserve explored tiles. Force re-refinement when they become
+        // visible, rather than erasing saved exploration on every F3+T.
+        for (Tile t : tiles.values()) if (t.stage == 2) t.stage = 1;
         nearbyCoarse.clear();
         nearbyFine.clear();
         coarseQueue.clear();
