@@ -6,6 +6,7 @@ package dev.roundmap;
  * sampling Minecraft blocks or performing GPU multi-pass ray marching.
  */
 final class RoundMapFog {
+    static boolean softEdges = true;
     private static int hash(int x, int z) {
         int h = x * 0x1F123BB5 ^ z * 0x5F356495;
         h ^= h >>> 16;
@@ -45,6 +46,10 @@ final class RoundMapFog {
     static int color(int worldX, int worldZ) {
         int terrain = RoundMapAtlas.shadedColorAt(worldX, worldZ);
         int base = RoundMapAtlas.colorAt(worldX, worldZ);
+        if (!softEdges) {
+            if (base != 0) return terrain;
+            return RoundMapClient.brightFog ? 0xFFF2F3F7 : 0xFF29313A;
+        }
         int radius = 7;
         int west = RoundMapAtlas.colorAt(worldX - radius, worldZ);
         int east = RoundMapAtlas.colorAt(worldX + radius, worldZ);
