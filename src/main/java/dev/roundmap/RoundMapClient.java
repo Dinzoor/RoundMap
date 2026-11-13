@@ -47,6 +47,8 @@ public final class RoundMapClient implements ClientModInitializer {
     private static KeyMapping mapKey, waypointKey, optionsKey, toggleKey, zoomInKey, zoomOutKey, listKey;
     private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
     private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true, showWorldMarkers = true;
+    private static int miniOpacity = 100;
+    private static boolean brightFog = true;
     private static int miniSize = 48, mapZoom = 3;
     private static double miniZoom = 1.0;
     private static double miniX = -1, miniY = -1;
@@ -69,6 +71,17 @@ public final class RoundMapClient implements ClientModInitializer {
             showCompass = Boolean.parseBoolean(p.getProperty("compass", "true"));
             showLabels = Boolean.parseBoolean(p.getProperty("labels", "true"));
             showWorldMarkers = Boolean.parseBoolean(p.getProperty("worldMarkers", "true"));
+            miniOpacity = Math.max(25, Math.min(100, Integer.parseInt(p.getProperty("opacity", "100"))));
+            brightFog = Boolean.parseBoolean(p.getProperty("brightFog", "true"));
+            RoundMapAtlas.readsPerTick = Math.max(2, Math.min(16, Integer.parseInt(p.getProperty("scanBudget", "8"))));
+            RoundMapAtlas.detailed = Boolean.parseBoolean(p.getProperty("detailed", "true"));
+            RoundMapRadar.players = Boolean.parseBoolean(p.getProperty("radarPlayers", "true"));
+            RoundMapRadar.hostile = Boolean.parseBoolean(p.getProperty("radarHostile", "false"));
+            RoundMapRadar.passive = Boolean.parseBoolean(p.getProperty("radarPassive", "false"));
+            RoundMapRadar.neutral = Boolean.parseBoolean(p.getProperty("radarNeutral", "false"));
+            RoundMapRadar.items = Boolean.parseBoolean(p.getProperty("radarItems", "false"));
+            RoundMapRadar.onMini = Boolean.parseBoolean(p.getProperty("radarMini", "true"));
+            RoundMapRadar.onFull = Boolean.parseBoolean(p.getProperty("radarFull", "false"));
             if (!Double.isFinite(miniX) || !Double.isFinite(miniY)) { miniX = -1; miniY = -1; }
         } catch (IOException | IllegalArgumentException e) { System.err.println("[RoundMap] Cannot load position: " + e); }
     }
@@ -84,6 +97,17 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("compass", Boolean.toString(showCompass));
         p.setProperty("labels", Boolean.toString(showLabels));
         p.setProperty("worldMarkers", Boolean.toString(showWorldMarkers));
+        p.setProperty("opacity", Integer.toString(miniOpacity));
+        p.setProperty("brightFog", Boolean.toString(brightFog));
+        p.setProperty("scanBudget", Integer.toString(RoundMapAtlas.readsPerTick));
+        p.setProperty("detailed", Boolean.toString(RoundMapAtlas.detailed));
+        p.setProperty("radarPlayers", Boolean.toString(RoundMapRadar.players));
+        p.setProperty("radarHostile", Boolean.toString(RoundMapRadar.hostile));
+        p.setProperty("radarPassive", Boolean.toString(RoundMapRadar.passive));
+        p.setProperty("radarNeutral", Boolean.toString(RoundMapRadar.neutral));
+        p.setProperty("radarItems", Boolean.toString(RoundMapRadar.items));
+        p.setProperty("radarMini", Boolean.toString(RoundMapRadar.onMini));
+        p.setProperty("radarFull", Boolean.toString(RoundMapRadar.onFull));
         try {
             Files.createDirectories(POSITION_FILE.getParent());
             try (OutputStream out = Files.newOutputStream(POSITION_FILE)) { p.store(out, "RoundMap minimap center, normalized to screen"); }
@@ -237,6 +261,8 @@ public final class RoundMapClient implements ClientModInitializer {
         RoundMapTextures.minimap(g, cx, cy, miniSize, miniZoom,
             mc.player.getBlockX(), mc.player.getBlockZ());
         outline(g, cx, cy, miniSize);
+        RoundMapRadar.draw(g, mc, cx, cy, mc.player.getBlockX(), mc.player.getBlockZ(),
+            (float)(miniSize * miniZoom / HALF), miniSize, miniSize, true);
         drawMarkers(g, mc, cx, cy, (float)(miniSize * miniZoom / HALF), miniSize,
             true, mc.player.getBlockX(), mc.player.getBlockZ());
         pointer(g, mc, cx, cy);
@@ -252,7 +278,9 @@ public final class RoundMapClient implements ClientModInitializer {
             if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
             int dx = Math.round((marker.x() - worldX) * scale);
             int dz = Math.round((marker.z() - worldZ) * scale);
-            if (Math.abs(dx) >= radius - 4 || Math.abs(dz) >= radius - 4) continue;
+            int limitX = circle ? radius - 4 : g.guiWidth() / 2 - 4;
+            int limitY = circle ? radius - 4 : g.guiHeight() / 2 - 4;
+            if (Math.abs(dx) >= limitX || Math.abs(dz) >= limitY) continue;
             if (circle && dx * dx + dz * dz >= (radius - 4) * (radius - 4)) continue;
             g.fill(cx + dx - 2, cy + dz - 2, cx + dx + 3, cy + dz + 3, 0xFFFFD640);
             if (showLabels) g.drawCenteredString(mc.font, marker.name(), cx + dx, cy + dz - 14, -1);
@@ -326,7 +354,9 @@ public final class RoundMapClient implements ClientModInitializer {
             int targetZ = mc.player.getBlockZ() + (int)Math.round(panZ);
             RoundMapTextures.fullscreen(g, width, height, targetX, targetZ, mapZoom);
             int cx = width / 2, cy = height / 2;
-            drawMarkers(g, mc, cx, cy, mapZoom, Math.min(width, height) / 2,
+            RoundMapRadar.draw(g, mc, cx, cy, targetX, targetZ,
+                mapZoom, width / 2, height / 2, false);
+            drawMarkers(g, mc, cx, cy, mapZoom, Math.max(width, height) / 2,
                 false, targetX, targetZ);
             int playerX = cx + (int)Math.round((mc.player.getBlockX() - targetX) * mapZoom);
             int playerZ = cy + (int)Math.round((mc.player.getBlockZ() - targetZ) * mapZoom);
@@ -399,9 +429,39 @@ public final class RoundMapClient implements ClientModInitializer {
                 addOption(x, y + 50, w, "Координаты: " + (showCoords ? "Вкл" : "Выкл"), () -> { showCoords = !showCoords; savePosition(); });
                 addOption(x, y + 75, w, "Компас: " + (showCompass ? "Вкл" : "Выкл"), () -> { showCompass = !showCompass; savePosition(); });
                 addOption(x, y + 100, w, "Масштаб местности: " + (int)(miniZoom * 100) + "%", () -> { miniZoom = miniZoom >= 4.0 ? 1.0 : miniZoom + 0.5; savePosition(); });
+                addOption(x, y + 125, w, "Прозрачность: " + miniOpacity + "%", () -> {
+                    miniOpacity = miniOpacity <= 25 ? 100 : miniOpacity - 25;
+                    RoundMapTextures.invalidate(); savePosition();
+                });
                 addRenderableWidget(Button.builder(Component.literal("Переместить мини-карту мышью"),
                     b -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))))
-                    .bounds(x, y + 125, w, 20).build());
+                    .bounds(x, y + 150, w, 20).build());
+            } else if (tab == 1) {
+                addOption(x, y, w, "На мини-карте: " + (RoundMapRadar.onMini ? "Вкл" : "Выкл"), () -> {
+                    RoundMapRadar.onMini = !RoundMapRadar.onMini; savePosition(); });
+                addOption(x, y + 25, w, "На большой карте: " + (RoundMapRadar.onFull ? "Вкл" : "Выкл"), () -> {
+                    RoundMapRadar.onFull = !RoundMapRadar.onFull; savePosition(); });
+                addOption(x, y + 50, w, "Игроки: " + (RoundMapRadar.players ? "Вкл" : "Выкл"), () -> {
+                    RoundMapRadar.players = !RoundMapRadar.players; savePosition(); });
+                addOption(x, y + 75, w, "Враждебные мобы: " + (RoundMapRadar.hostile ? "Вкл" : "Выкл"), () -> {
+                    RoundMapRadar.hostile = !RoundMapRadar.hostile; savePosition(); });
+                addOption(x, y + 100, w, "Мирные мобы: " + (RoundMapRadar.passive ? "Вкл" : "Выкл"), () -> {
+                    RoundMapRadar.passive = !RoundMapRadar.passive; savePosition(); });
+                addOption(x, y + 125, w, "Нейтральные мобы: " + (RoundMapRadar.neutral ? "Вкл" : "Выкл"), () -> {
+                    RoundMapRadar.neutral = !RoundMapRadar.neutral; savePosition(); });
+                addOption(x, y + 150, w, "Предметы: " + (RoundMapRadar.items ? "Вкл" : "Выкл"), () -> {
+                    RoundMapRadar.items = !RoundMapRadar.items; savePosition(); });
+            } else if (tab == 2) {
+                addOption(x, y, w, "Туман войны: " + (brightFog ? "Светлый" : "Тёмный"), () -> {
+                    brightFog = !brightFog; RoundMapTextures.invalidate(); savePosition(); });
+            } else if (tab == 4) {
+                addOption(x, y, w, "Детализация: " + (RoundMapAtlas.detailed ? "Подробно" : "Быстро"), () -> {
+                    RoundMapAtlas.detailed = !RoundMapAtlas.detailed;
+                    RoundMapAtlas.forceRefresh(); savePosition(); });
+                addOption(x, y + 25, w, "Скорость исследования: " + RoundMapAtlas.readsPerTick + " блоков/тик", () -> {
+                    RoundMapAtlas.readsPerTick = RoundMapAtlas.readsPerTick >= 16 ? 2 :
+                        RoundMapAtlas.readsPerTick == 2 ? 4 : RoundMapAtlas.readsPerTick == 4 ? 8 : 16;
+                    savePosition(); });
             } else if (tab == 3) {
                 addOption(x, y, w, "Названия точек: " + (showLabels ? "Вкл" : "Выкл"),
                     () -> { showLabels = !showLabels; savePosition(); });
@@ -420,8 +480,8 @@ public final class RoundMapClient implements ClientModInitializer {
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
             super.render(g, mouseX, mouseY, delta);
-            if (tab == 1 || tab == 2 || tab == 4)
-                g.drawCenteredString(font, "Функции этой вкладки пока в разработке", width / 2, height / 2, 0xFFCCCCCC);
+            if (tab == 2)
+                g.drawCenteredString(font, "Неисследованные территории остаются скрытыми", width / 2, height / 2, 0xFFCCCCCC);
         }
     }
 
