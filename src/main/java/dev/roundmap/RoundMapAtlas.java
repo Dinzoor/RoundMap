@@ -75,7 +75,20 @@ final class RoundMapAtlas {
 
     static void forceRefresh() { lastChunkX = Integer.MIN_VALUE; }
     static int revision() { return revision; }
-    static int exploredChunks() { return tiles.size(); }
+    static int exploredChunks() {
+        int explored = 0;
+        for (Tile tile : tiles.values()) if (tile.stage > 0) explored++;
+        return explored;
+    }
+
+    // Old alpha builds wrote this particular gray whenever the sampled
+    // surface was missing. It is not real terrain and should be fog.
+    private static boolean invalidFallback(int color) {
+        int r = (color >>> 16) & 255;
+        int g = (color >>> 8) & 255;
+        int b = color & 255;
+        return r >= 59 && r <= 109 && g - r == 8 && b == g;
+    }
 
     private static long key(int cx, int cz) {
         return ((long)cx << 32) | (cz & 0xFFFFFFFFL);
@@ -83,12 +96,16 @@ final class RoundMapAtlas {
 
     static int colorAt(int x, int z) {
         Tile t = tiles.get(key(x >> 4, z >> 4));
-        return t == null ? 0 : t.pixels[((z & 15) << 4) | (x & 15)];
+        if (t == null) return 0;
+        int color = t.pixels[((z & 15) << 4) | (x & 15)];
+        return invalidFallback(color) ? 0 : color;
     }
 
     static int heightAt(int x, int z) {
         Tile t = tiles.get(key(x >> 4, z >> 4));
-        return t == null ? Short.MIN_VALUE : t.heights[((z & 15) << 4) | (x & 15)];
+        if (t == null) return Short.MIN_VALUE;
+        int index = ((z & 15) << 4) | (x & 15);
+        return invalidFallback(t.pixels[index]) ? Short.MIN_VALUE : t.heights[index];
     }
 
     // Directional hillshade with two neighbouring height samples; computed from
@@ -170,6 +187,17 @@ final class RoundMapAtlas {
                             // Preserve old colors but rebuild detailed relief.
                             stage = 1;
                         }
+                        boolean invalid = false;
+                        for (int p = 0; p < 256; p++) {
+                            if (invalidFallback(colors[p])) {
+                                colors[p] = 0;
+                                if (heights != null) heights[p] = Short.MIN_VALUE;
+                                invalid = true;
+                            }
+                        }
+                        if (invalid) {
+                            stage = 0; // Re-explore those chunks on the next visit.
+                        }
                         loaded.put(k, new Tile(stage, colors, heights));
                     }
                 } catch (IOException e) {
@@ -235,8 +263,34 @@ final class RoundMapAtlas {
             BlockPos pos = new BlockPos(x, 0, z);
             BlockPos ground = mc.level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, pos).below();
             BlockState state = mc.level.getBlockState(ground);
+            // An unloaded/placeholder chunk can report a height below the
+            // actual world. Do not turn void air into a dark gray map tile.
+            if (state.isAir()) {
+                active = Long.MIN_VALUE;
+                continue;
+            }
             MapColor mapColor = state.getMapColor(mc.level, ground);
-            int color = mapColor == MapColor.NONE ? 0xFF545C5C : mapColor.col | 0xFF000000;
+            if (mapColor == MapColor.NONE) {
+                // Ignore thin plants or other non-map-color blocks; use the
+                // underlying solid surface where possible.
+                for (int depth = 1; depth <= 6 && mapColor == MapColor.NONE; depth++) {
+                    BlockPos lower = ground.below(depth);
+                    BlockState candidate = mc.level.getBlockState(lower);
+                    if (!candidate.isAir()) {
+                        MapColor sample = candidate.getMapColor(mc.level, lower);
+                        if (sample != MapColor.NONE) {
+                            ground = lower;
+                            state = candidate;
+                            mapColor = sample;
+                        }
+                    }
+                }
+                if (mapColor == MapColor.NONE) {
+                    active = Long.MIN_VALUE;
+                    continue;
+                }
+            }
+            int color = mapColor.col | 0xFF000000;
             // A lightweight biome-aware material palette. Capture only on the
             // client tick; no live biome queries happen while drawing the map.
             if (state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.MOSS_BLOCK)) {
