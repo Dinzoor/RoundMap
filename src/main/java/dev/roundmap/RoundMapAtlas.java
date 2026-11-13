@@ -32,7 +32,8 @@ import net.minecraft.world.level.material.MapColor;
 final class RoundMapAtlas {
     private static final int MAGIC = 0x524D4133; // RMA3 stores terrain height
     private static final int OLD_MAGIC = 0x524D4132; // backward compatible
-    private static final int RADIUS_CHUNKS = 10;
+    // Survey only chunks actually within the player's configured view distance.
+    private static final int MAX_VISIBLE_RADIUS = 12;
     static int readsPerTick = 8;
     static boolean detailed = true;
     static boolean contours = true;
@@ -44,6 +45,8 @@ final class RoundMapAtlas {
         return t;
     });
     private static final Map<Long, Tile> tiles = new HashMap<>();
+    private static final ArrayDeque<Long> nearbyCoarse = new ArrayDeque<>();
+    private static final ArrayDeque<Long> nearbyFine = new ArrayDeque<>();
     private static final ArrayDeque<Long> coarseQueue = new ArrayDeque<>();
     private static final ArrayDeque<Long> fineQueue = new ArrayDeque<>();
     private static Object world;
@@ -52,6 +55,7 @@ final class RoundMapAtlas {
     private static boolean dirty;
     private static long lastSave, lastRefresh;
     private static int lastChunkX = Integer.MIN_VALUE, lastChunkZ = Integer.MIN_VALUE;
+    private static int lastViewRadius = -1;
     private static long active = Long.MIN_VALUE;
     private static int activeIndex, activeStep;
     private static int revision;
@@ -123,9 +127,12 @@ final class RoundMapAtlas {
         if (world == mc.level && worldKey.equals(currentWorldKey)) return;
         saveAsync();
         tiles.clear();
+        nearbyCoarse.clear();
+        nearbyFine.clear();
         coarseQueue.clear();
         fineQueue.clear();
         active = Long.MIN_VALUE;
+        lastViewRadius = -1;
         lastChunkX = Integer.MIN_VALUE;
         lastChunkZ = Integer.MIN_VALUE;
         world = mc.level;
@@ -187,12 +194,18 @@ final class RoundMapAtlas {
         switchWorld(mc);
         if (mc.level == null || mc.player == null) return;
         int cx = mc.player.getBlockX() >> 4, cz = mc.player.getBlockZ() >> 4;
+        // The client may know about distant chunks, but exploring them before
+        // they enter the player's visible/rendered range reveals too much map.
+        int viewRadius = Math.max(2, Math.min(MAX_VISIBLE_RADIUS,
+            mc.options.renderDistance().get() - 1));
         long now = System.nanoTime();
-        if (cx != lastChunkX || cz != lastChunkZ || now - lastRefresh > 10_000_000_000L) {
-            rebuildQueues(cx, cz);
+        if (cx != lastChunkX || cz != lastChunkZ || viewRadius != lastViewRadius
+            || now - lastRefresh > 3_000_000_000L) {
+            rebuildQueues(cx, cz, viewRadius);
             lastRefresh = now;
             lastChunkX = cx;
             lastChunkZ = cz;
+            lastViewRadius = viewRadius;
         }
         int budget = readsPerTick;
         while (budget > 0) {
@@ -280,13 +293,27 @@ final class RoundMapAtlas {
     }
 
     private static boolean nextTile(Minecraft mc) {
-        for (int i = 0; i < 600; i++) {
-            boolean coarse = !coarseQueue.isEmpty();
-            Long next = coarse ? coarseQueue.pollFirst() : fineQueue.pollFirst();
+        for (int i = 0; i < 750; i++) {
+            boolean coarse;
+            Long next;
+            if (!nearbyCoarse.isEmpty()) {
+                coarse = true;
+                next = nearbyCoarse.pollFirst();
+            } else if (!nearbyFine.isEmpty()) {
+                coarse = false;
+                next = nearbyFine.pollFirst();
+            } else if (!coarseQueue.isEmpty()) {
+                coarse = true;
+                next = coarseQueue.pollFirst();
+            } else {
+                coarse = false;
+                next = fineQueue.pollFirst();
+            }
             if (next == null) return false;
             Tile t = tiles.get(next);
             if (t != null && t.stage >= (coarse ? 1 : 2)) continue;
             int tx = (int)(next >> 32), tz = (int)(long)next;
+            // hasChunkAt does NOT request or generate an unloaded chunk.
             if (!mc.level.hasChunkAt(new BlockPos(tx * 16, 0, tz * 16))) continue;
             active = next;
             activeIndex = 0;
@@ -296,27 +323,32 @@ final class RoundMapAtlas {
         return false;
     }
 
-    private static void rebuildQueues(int centerX, int centerZ) {
+    private static void rebuildQueues(int centerX, int centerZ, int viewRadius) {
+        nearbyCoarse.clear();
+        nearbyFine.clear();
         coarseQueue.clear();
         fineQueue.clear();
         active = Long.MIN_VALUE;
-        // Rings ensure the close surroundings appear before remote terrain.
-        for (int radius = 0; radius <= RADIUS_CHUNKS; radius++) {
+        // Explore near the player first so the high-resolution map appears
+        // where they are standing; only then fill the distant rendered ring.
+        // Every scan is restricted to chunks inside the view-distance circle.
+        for (int radius = 0; radius <= viewRadius; radius++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dx = -radius; dx <= radius; dx++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
-                    // Explore an irregular disk, not a square of chunks. Together
-                    // with the blurred fog texture this creates organic map edges.
                     int seed = (centerX + dx) * 73428767 ^ (centerZ + dz) * 912931;
                     seed ^= seed >>> 13;
-                    double outer = RADIUS_CHUNKS - 1.0 + ((seed & 7) / 7.0) * 1.5;
+                    double outer = viewRadius - 1.0 + ((seed & 7) / 7.0) * 1.5;
                     if (dx * dx + dz * dz > outer * outer) continue;
                     long k = key(centerX + dx, centerZ + dz);
                     Tile tile = tiles.get(k);
-                    if (tile == null || tile.stage == 0) coarseQueue.addLast(k);
-                    // Refine nearby tiles after the coarse outer ring is available.
-                    if (detailed && radius <= 4 && (tile == null || tile.stage < 2))
-                        fineQueue.addLast(k);
+                    boolean near = radius <= 2;
+                    if (tile == null || tile.stage == 0) {
+                        (near ? nearbyCoarse : coarseQueue).addLast(k);
+                    }
+                    if (detailed && radius <= 4 && (tile == null || tile.stage < 2)) {
+                        (near ? nearbyFine : fineQueue).addLast(k);
+                    }
                 }
             }
         }
