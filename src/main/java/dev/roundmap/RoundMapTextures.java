@@ -36,7 +36,7 @@ final class RoundMapTextures {
             revision = -1;
             zoomKey = -1;
         }
-        void invalidate() { revision = -1; }
+        void invalidate() { revision = -1; updatedAt = 0; }
         boolean needsRefresh(int x, int z, int zoom, long minIntervalNanos) {
             long time = System.nanoTime();
             boolean changed = x != centerX || z != centerZ || zoom != zoomKey ||
@@ -79,24 +79,51 @@ final class RoundMapTextures {
             radius * 2, radius * 2, pixels, pixels, pixels, pixels);
     }
 
+    /**
+     * Keep an oversized map texture cached around a stable world-space anchor.
+     * Dragging shifts the GPU quad every frame, even for sub-block movement,
+     * without rebuilding a texture every time the mouse moves.
+     */
     static void fullscreen(GuiGraphics g, int screenW, int screenH,
-                           int worldX, int worldZ, int zoom) {
-        int tw = Math.min(640, Math.max(128, screenW));
-        int th = Math.min(640, Math.max(128, (int)Math.round(tw * (screenH / (double)Math.max(1, screenW)))));
+                           double worldX, double worldZ, int zoom) {
+        final int padding = 112;
+        int drawW = screenW + padding * 2;
+        int drawH = screenH + padding * 2;
+        int tw = Math.min(640, Math.max(128, drawW));
+        int th = Math.min(640, Math.max(128,
+            (int)Math.round(tw * (drawH / (double)drawW))));
         FULL.allocate(tw, th);
-        if (FULL.needsRefresh(worldX, worldZ, zoom, 200_000_000L)) {
-            double blockPerTexel = screenW / (double)(tw * zoom);
+        long now = System.nanoTime();
+        boolean noImage = FULL.centerX == Integer.MIN_VALUE;
+        boolean zoomChanged = zoom != FULL.zoomKey;
+        boolean pannedOutsideBuffer = Math.abs((worldX - FULL.centerX) * zoom) >= padding * .67
+            || Math.abs((worldZ - FULL.centerZ) * zoom) >= padding * .67;
+        boolean dataChanged = RoundMapAtlas.revision() != FULL.revision;
+        boolean refreshTerrain = dataChanged
+            && (FULL.updatedAt == 0 || now - FULL.updatedAt >= 300_000_000L);
+        if (noImage || zoomChanged || pannedOutsideBuffer || refreshTerrain) {
+            int anchorX = (int)Math.floor(worldX);
+            int anchorZ = (int)Math.floor(worldZ);
+            double blockPerTexel = drawW / (double)(tw * zoom);
             for (int py = 0; py < th; py++) {
-                int wz = worldZ + (int)Math.floor((py + .5 - th / 2.0) * blockPerTexel);
+                int wz = anchorZ + (int)Math.floor((py + .5 - th / 2.0) * blockPerTexel);
                 for (int px = 0; px < tw; px++) {
-                    int wx = worldX + (int)Math.floor((px + .5 - tw / 2.0) * blockPerTexel);
+                    int wx = anchorX + (int)Math.floor((px + .5 - tw / 2.0) * blockPerTexel);
                     FULL.pixels.setPixel(px, py, RoundMapFog.color(wx, wz));
                 }
             }
             FULL.texture.upload();
+            FULL.centerX = anchorX;
+            FULL.centerZ = anchorZ;
+            FULL.zoomKey = zoom;
+            FULL.revision = RoundMapAtlas.revision();
+            FULL.updatedAt = now;
         }
-        g.blit(RenderPipelines.GUI_TEXTURED, FULL.id, 0, 0, 0f, 0f,
-            screenW, screenH, tw, th, tw, th);
+        int offsetX = (int)Math.round((FULL.centerX - worldX) * zoom);
+        int offsetZ = (int)Math.round((FULL.centerZ - worldZ) * zoom);
+        g.blit(RenderPipelines.GUI_TEXTURED, FULL.id,
+            -padding + offsetX, -padding + offsetZ, 0f, 0f,
+            drawW, drawH, tw, th, tw, th);
     }
 
     private RoundMapTextures() {}
