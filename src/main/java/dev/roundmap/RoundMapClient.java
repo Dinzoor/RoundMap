@@ -31,6 +31,9 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final List<Marker> markers = new ArrayList<>();
     private static int centerX, centerZ, scan = GRID * GRID;
     private static long nextSampleAt;
+    private static final int SAMPLE_BATCH = 3;
+    private static final long SAMPLE_INTERVAL_NS = 100_000_000L;
+    private static int lastPlayerX = Integer.MIN_VALUE, lastPlayerZ = Integer.MIN_VALUE;
     private static Object lastWorld;
     private static boolean lastM, lastB, lastO;
     private static boolean showMini = true, showLabels = true;
@@ -85,11 +88,12 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     private static void sample(Minecraft mc) {
-        // Sample no more than 24 blocks every 50ms; never scan on every render frame.
+        // Terrain heightmap reads can be very expensive on modded servers.
+        // Keep a tiny fixed workload per 100ms instead of stalling a render frame.
         long now = System.nanoTime();
         if (now < nextSampleAt) return;
-        nextSampleAt = now + 50_000_000L;
-        for (int n = 0; n < 24 && scan < GRID * GRID; n++, scan++) {
+        nextSampleAt = now + SAMPLE_INTERVAL_NS;
+        for (int n = 0; n < SAMPLE_BATCH && scan < GRID * GRID; n++, scan++) {
             int row = scan / GRID, col = scan % GRID;
             int x = centerX + col - HALF, z = centerZ + row - HALF;
             BlockPos pos = new BlockPos(x, 0, z);
@@ -121,23 +125,29 @@ public final class RoundMapClient implements ClientModInitializer {
             else if (o && !lastO) mc.setScreen(new OptionsScreen());
         }
         lastM = m; lastB = b; lastO = o;
-        recenter(mc, mc.player.getBlockX(), mc.player.getBlockZ());
-        sample(mc);
+        int px = mc.player.getBlockX(), pz = mc.player.getBlockZ();
+        if (lastWorld != mc.level || lastPlayerX == Integer.MIN_VALUE ||
+            Math.abs(px - lastPlayerX) >= 24 || Math.abs(pz - lastPlayerZ) >= 24) {
+            lastPlayerX = px;
+            lastPlayerZ = pz;
+            recenter(mc, px, pz);
+        }
+        if (showMini && !mc.options.hideGui) sample(mc);
         if (!showMini || mc.options.hideGui) return;
         int cx = g.guiWidth() - miniSize - 12, cy = miniSize + 18;
         // Draw horizontal color runs instead of one GPU rectangle per pixel.
-        for (int y = -miniSize; y <= miniSize; y++) {
+        for (int y = -miniSize; y <= miniSize; y += 2) {
             int gy = HALF + y * HALF / miniSize;
             if (gy < 0 || gy >= GRID) continue;
             int extent = (int)Math.sqrt(miniSize * miniSize - y * y);
             int runStart = -extent;
             int lastColor = Integer.MIN_VALUE;
-            for (int x = -extent; x <= extent + 1; x++) {
+            for (int x = -extent; x <= extent + 2; x += 2) {
                 int gx = HALF + x * HALF / miniSize;
                 int color = x > extent || gx < 0 || gx >= GRID ? Integer.MIN_VALUE : terrain[gy][gx];
                 if (color != lastColor) {
                     if (lastColor != Integer.MIN_VALUE)
-                        g.fill(cx + runStart, cy + y, cx + x, cy + y + 1, lastColor);
+                        g.fill(cx + runStart, cy + y, cx + x, cy + y + 2, lastColor);
                     runStart = x;
                     lastColor = color;
                 }
