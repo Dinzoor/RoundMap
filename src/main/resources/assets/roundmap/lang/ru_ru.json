@@ -2,5 +2,9 @@
   "key.category.roundmap.controls": "RoundMap",
   "key.roundmap.full_map": "Полноэкранная карта",
   "key.roundmap.waypoint": "Создать точку",
-  "key.roundmap.settings": "Настройки RoundMap"
+  "key.roundmap.settings": "Настройки RoundMap",
+  "key.roundmap.toggle": "Показать/скрыть мини-карту",
+  "key.roundmap.zoom_in": "Увеличить мини-карту",
+  "key.roundmap.zoom_out": "Уменьшить мини-карту",
+  "key.roundmap.list": "Список точек"
 }
