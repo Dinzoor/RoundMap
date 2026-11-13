@@ -268,7 +268,8 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void hud(GuiGraphics g) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
-        if (mc.options.hideGui) return;
+        // No HUD minimap redraw behind the full-size map.
+        if (mc.screen instanceof MapScreen || mc.options.hideGui) return;
         if (showWorldMarkers && mc.screen == null) drawWorldMarkers(g, mc);
         if (showMini) drawMini(g, mc, miniCenterX(g.guiWidth()), miniCenterY(g.guiHeight()));
     }
