@@ -7,6 +7,10 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.network.chat.Component;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -17,8 +21,8 @@ import org.lwjgl.glfw.GLFW;
 /** Lightweight client-only north-up map. No entity scanning. */
 public final class RoundMapClient implements ClientModInitializer {
     private static final int MINI_RADIUS = 48;
-    private static final int GRID = 33;
-    private static final int BLOCKS_PER_CELL = 4;
+    private static final int GRID = 97;
+    private static final int BLOCKS_PER_CELL = 1;
     private static final int EMPTY = 0xFF303A43;
     private static final int[][] colors = new int[GRID][GRID];
     private static final List<Marker> markers = new ArrayList<>();
@@ -29,7 +33,34 @@ public final class RoundMapClient implements ClientModInitializer {
     private static int scanRow = 0;
     private static Object lastWorld;
 
-    private record Marker(int x, int z, String dimension, int number) {}
+    private record Marker(int x, int z, String dimension, String name) {}
+
+    private static final class NameScreen extends Screen {
+        private EditBox name;
+        private final int x, z;
+        private final String dimension;
+
+        private NameScreen(int x, int z, String dimension) {
+            super(Component.literal("New waypoint"));
+            this.x = x;
+            this.z = z;
+            this.dimension = dimension;
+        }
+
+        @Override protected void init() {
+            name = new EditBox(this.font, this.width / 2 - 100, this.height / 2 - 25,
+                200, 20, Component.literal("Waypoint name"));
+            name.setMaxLength(40);
+            name.setValue("Waypoint " + (markers.size() + 1));
+            this.addRenderableWidget(name);
+            this.setInitialFocus(name);
+            this.addRenderableWidget(Button.builder(Component.literal("Save waypoint"), button -> {
+                String label = name.getValue().trim();
+                if (!label.isEmpty()) markers.add(new Marker(x, z, dimension, label));
+                this.minecraft.setScreen(null);
+            }).bounds(this.width / 2 - 100, this.height / 2 + 5, 200, 20).build());
+        }
+    }
 
     @Override public void onInitializeClient() {
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
@@ -50,16 +81,16 @@ public final class RoundMapClient implements ClientModInitializer {
         boolean b = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_B) == GLFW.GLFW_PRESS;
         if (m && !lastM && mc.screen == null) expanded = !expanded;
         if (b && !lastB && mc.screen == null) {
-            markers.add(new Marker(mc.player.getBlockX(), mc.player.getBlockZ(),
-                mc.level.dimension().toString(), markers.size() + 1));
+            mc.setScreen(new NameScreen(mc.player.getBlockX(), mc.player.getBlockZ(),
+                mc.level.dimension().toString()));
         }
         lastM = m;
         lastB = b;
 
         int px = mc.player.getBlockX();
         int pz = mc.player.getBlockZ();
-        if (lastWorld != mc.level || Math.abs(px - lastX) >= BLOCKS_PER_CELL ||
-            Math.abs(pz - lastZ) >= BLOCKS_PER_CELL) {
+        if (lastWorld != mc.level || Math.abs(px - lastX) >= 8 ||
+            Math.abs(pz - lastZ) >= 8) {
             lastWorld = mc.level;
             lastX = px;
             lastZ = pz;
@@ -68,7 +99,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 for (int x = 0; x < GRID; x++) colors[z][x] = EMPTY;
         }
         // Scan at most two rows per frame instead of thousands of blocks each frame.
-        for (int n = 0; n < 2 && scanRow < GRID; n++, scanRow++) {
+        for (int n = 0; n < 3 && scanRow < GRID; n++, scanRow++) {
             int dz = scanRow - GRID / 2;
             for (int x = 0; x < GRID; x++) {
                 int dx = x - GRID / 2;
@@ -92,7 +123,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void drawMini(GuiGraphics g, Minecraft mc, int px, int pz) {
         int cx = g.guiWidth() - MINI_RADIUS - 12;
         int cy = MINI_RADIUS + 17;
-        int cell = 3;
+        int cell = 1;
         for (int z = 0; z < GRID; z++) {
             int y = (z - GRID / 2) * cell;
             for (int x = 0; x < GRID; x++) {
@@ -112,7 +143,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void drawLarge(GuiGraphics g, Minecraft mc, int px, int pz) {
         int cx = g.guiWidth() / 2;
         int cy = g.guiHeight() / 2;
-        int cell = Math.max(3, Math.min(10, (Math.min(g.guiWidth(), g.guiHeight()) - 45) / GRID));
+        int cell = Math.max(1, Math.min(5, (Math.min(g.guiWidth(), g.guiHeight()) - 65) / GRID));
         int half = GRID * cell / 2;
         g.fill(cx - half - 6, cy - half - 22, cx + half + 6, cy + half + 24, 0xE51B202A);
         for (int z = 0; z < GRID; z++) {
@@ -124,7 +155,7 @@ public final class RoundMapClient implements ClientModInitializer {
         }
         drawMarkers(g, mc, px, pz, cx, cy, cell, half);
         pointer(g, mc, cx, cy);
-        g.drawCenteredString(mc.font, "RoundMap  |  M: close  |  B: mark position",
+        g.drawCenteredString(mc.font, "RoundMap  |  M: close  |  B: name waypoint",
             cx, cy - half - 17, -1);
         g.drawCenteredString(mc.font, "X " + px + "  Y " + mc.player.getBlockY() + "  Z " + pz,
             cx, cy + half + 8, -1);
@@ -140,7 +171,7 @@ public final class RoundMapClient implements ClientModInitializer {
             if (Math.abs(dx) > radius - 5 || Math.abs(dz) > radius - 5) continue;
             if (!expanded && dx * dx + dz * dz > (radius - 5) * (radius - 5)) continue;
             g.fill(cx + dx - 2, cy + dz - 2, cx + dx + 3, cy + dz + 3, 0xFFFFD640);
-            g.drawCenteredString(mc.font, Integer.toString(marker.number()),
+            g.drawCenteredString(mc.font, marker.name(),
                 cx + dx, cy + dz - 13, -1);
         }
     }
