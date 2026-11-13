@@ -45,7 +45,7 @@ public final class RoundMapClient implements ClientModInitializer {
             return;
         }
 
-        long window = mc.getWindow().getWindow();
+        long window = mc.getWindow().handle();
         boolean m = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_M) == GLFW.GLFW_PRESS;
         boolean b = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_B) == GLFW.GLFW_PRESS;
         if (m && !lastM && mc.screen == null) expanded = !expanded;
