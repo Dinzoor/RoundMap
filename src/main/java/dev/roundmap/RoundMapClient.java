@@ -284,7 +284,7 @@ public final class RoundMapClient implements ClientModInitializer {
             if (now > biomeRefreshAt) {
                 biomeRefreshAt = now + 1_000_000_000L;
                 biomeLabel = mc.level.getBiome(mc.player.blockPosition()).unwrapKey()
-                    .map(k -> k.location().getPath().replace('_', ' ')).orElse("unknown");
+                    .map(k -> k.identifier().getPath().replace('_', ' ')).orElse("unknown");
             }
             g.drawCenteredString(mc.font, "Биом: " + biomeLabel,
                 cx, cy + miniSize + (showCoords ? 19 : 8), 0xFFFFFFFF);
