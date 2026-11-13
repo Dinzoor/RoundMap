@@ -237,7 +237,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void drawWorldMarkers(GuiGraphics g, Minecraft mc) {
         double yaw = Math.toRadians(mc.player.getYRot());
         double forwardX = -Math.sin(yaw), forwardZ = Math.cos(yaw);
-        double rightX = -forwardZ, rightZ = forwardX;
+        double rightX = forwardZ, rightZ = -forwardX;
         int w = g.guiWidth(), h = g.guiHeight();
         for (Marker marker : markers) {
             if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
