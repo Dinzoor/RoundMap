@@ -6,10 +6,10 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.Heightmap;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 /** Small, north-up circular surface map. Never scans entities. */
 public final class RoundMapClient implements ClientModInitializer {
@@ -19,7 +19,7 @@ public final class RoundMapClient implements ClientModInitializer {
 
     @Override public void onInitializeClient() {
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
-            ResourceLocation.fromNamespaceAndPath("roundmap", "minimap"),
+            Identifier.fromNamespaceAndPath("roundmap", "minimap"),
             (graphics, tickCounter) -> draw(graphics));
     }
 
