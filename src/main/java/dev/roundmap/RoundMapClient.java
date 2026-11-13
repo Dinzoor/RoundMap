@@ -467,7 +467,7 @@ public final class RoundMapClient implements ClientModInitializer {
             // Keep fractional pan positions for pixel-by-pixel smooth movement.
             double targetX = mc.player.getBlockX() + panX;
             double targetZ = mc.player.getBlockZ() + panZ;
-            RoundMapTextures.fullscreen(g, width, height, targetX, targetZ, mapZoom);
+            RoundMapTextures.fullscreen(g, width, height, targetX, targetZ, mapZoom, dragging);
             int cx = width / 2, cy = height / 2;
             RoundMapRadar.draw(g, mc, cx, cy,
                 (int)Math.round(targetX), (int)Math.round(targetZ),
