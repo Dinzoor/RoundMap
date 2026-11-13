@@ -48,6 +48,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("roundmap", "controls"));
     private static boolean showMini = true, showLabels = true, showCoords = true, showCompass = true;
     private static int miniSize = 48, mapZoom = 3;
+    private static double miniZoom = 1.0;
     private static double miniX = -1, miniY = -1;
     private static final Path POSITION_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-position.properties");
 
@@ -59,6 +60,9 @@ public final class RoundMapClient implements ClientModInitializer {
             miniX = Double.parseDouble(p.getProperty("x", "-1"));
             miniY = Double.parseDouble(p.getProperty("y", "-1"));
             miniSize = Integer.parseInt(p.getProperty("size", "48"));
+            miniZoom = Double.parseDouble(p.getProperty("zoom", "1.0"));
+            if (!Double.isFinite(miniZoom)) miniZoom = 1.0;
+            miniZoom = Math.max(1.0, Math.min(4.0, miniZoom));
             miniSize = Math.max(24, Math.min(120, miniSize));
             showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
             showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
@@ -73,6 +77,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("x", Double.toString(miniX));
         p.setProperty("y", Double.toString(miniY));
         p.setProperty("size", Integer.toString(miniSize));
+        p.setProperty("zoom", Double.toString(miniZoom));
         p.setProperty("visible", Boolean.toString(showMini));
         p.setProperty("coords", Boolean.toString(showCoords));
         p.setProperty("compass", Boolean.toString(showCompass));
@@ -137,8 +142,8 @@ public final class RoundMapClient implements ClientModInitializer {
             else if (optionsKey.consumeClick()) client.setScreen(new OptionsScreen());
             else if (listKey.consumeClick()) client.setScreen(new WaypointListScreen(null, 0));
             else if (toggleKey.consumeClick()) { showMini = !showMini; savePosition(); }
-            else if (zoomInKey.consumeClick()) { miniSize = Math.min(120, miniSize + 8); savePosition(); }
-            else if (zoomOutKey.consumeClick()) { miniSize = Math.max(24, miniSize - 8); savePosition(); }
+            else if (zoomInKey.consumeClick()) { miniZoom = Math.min(4.0, miniZoom + 0.5); savePosition(); }
+            else if (zoomOutKey.consumeClick()) { miniZoom = Math.max(1.0, miniZoom - 0.5); savePosition(); }
         });
         loadMarkers();
         loadPosition();
@@ -207,13 +212,13 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void drawMini(GuiGraphics g, Minecraft mc, int cx, int cy) {
         // Draw horizontal color runs instead of one GPU rectangle per pixel.
         for (int y = -miniSize; y <= miniSize; y += 2) {
-            int gy = HALF + y * HALF / miniSize;
+            int gy = HALF + (int)Math.round(y * HALF / (miniSize * miniZoom));
             if (gy < 0 || gy >= GRID) continue;
             int extent = (int)Math.sqrt(miniSize * miniSize - y * y);
             int runStart = -extent;
             int lastColor = Integer.MIN_VALUE;
             for (int x = -extent; x <= extent + 2; x += 2) {
-                int gx = HALF + x * HALF / miniSize;
+                int gx = HALF + (int)Math.round(x * HALF / (miniSize * miniZoom));
                 int color = x > extent || gx < 0 || gx >= GRID ? Integer.MIN_VALUE : terrain[gy][gx];
                 if (color != lastColor) {
                     if (lastColor != Integer.MIN_VALUE)
@@ -224,7 +229,7 @@ public final class RoundMapClient implements ClientModInitializer {
             }
         }
         outline(g, cx, cy, miniSize);
-        drawMarkers(g, mc, cx, cy, miniSize / (float)HALF, miniSize, true);
+        drawMarkers(g, mc, cx, cy, (float)(miniSize * miniZoom / HALF), miniSize, true);
         pointer(g, mc, cx, cy);
         if (showCompass) g.drawCenteredString(mc.font, "N", cx, cy - miniSize - 11, -1);
         if (showCoords) g.drawCenteredString(mc.font, "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(), cx, cy + miniSize + 8, -1);
@@ -365,9 +370,10 @@ public final class RoundMapClient implements ClientModInitializer {
                     { miniSize = miniSize == 48 ? 36 : miniSize == 36 ? 60 : 48; savePosition(); });
                 addOption(x, y + 50, w, "Координаты: " + (showCoords ? "Вкл" : "Выкл"), () -> { showCoords = !showCoords; savePosition(); });
                 addOption(x, y + 75, w, "Компас: " + (showCompass ? "Вкл" : "Выкл"), () -> { showCompass = !showCompass; savePosition(); });
+                addOption(x, y + 100, w, "Масштаб местности: " + (int)(miniZoom * 100) + "%", () -> { miniZoom = miniZoom >= 4.0 ? 1.0 : miniZoom + 0.5; savePosition(); });
                 addRenderableWidget(Button.builder(Component.literal("Переместить мини-карту мышью"),
                     b -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))))
-                    .bounds(x, y + 100, w, 20).build());
+                    .bounds(x, y + 125, w, 20).build());
             } else if (tab == 3) {
                 addOption(x, y, w, "Названия точек: " + (showLabels ? "Вкл" : "Выкл"),
                     () -> { showLabels = !showLabels; savePosition(); });
