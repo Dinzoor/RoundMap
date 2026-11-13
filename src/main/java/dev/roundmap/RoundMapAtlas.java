@@ -118,20 +118,9 @@ final class RoundMapAtlas {
         return 0xFF000000 | red << 16 | green << 8 | blue;
     }
 
-    private static Path pathFor(Minecraft mc) {
-        String server = mc.getCurrentServer() == null ? null : mc.getCurrentServer().ip;
-        String id = server == null
-            ? "single:" + (mc.getSingleplayerServer() == null ? "local" : mc.getSingleplayerServer().getWorldData().getLevelName())
-            : "remote:" + server;
-        worldKey = id + "|" + mc.level.dimension().toString();
-        String hex = Integer.toHexString(worldKey.hashCode()) +
-            "-" + Integer.toHexString(worldKey.length());
-        return FabricLoader.getInstance().getConfigDir()
-            .resolve("roundmap").resolve("explored").resolve(hex + ".dat.gz");
-    }
-
     private static void switchWorld(Minecraft mc) {
-        if (world == mc.level) return;
+        String currentWorldKey = RoundMapWorldIdentity.key(mc);
+        if (world == mc.level && worldKey.equals(currentWorldKey)) return;
         saveAsync();
         tiles.clear();
         coarseQueue.clear();
@@ -148,7 +137,9 @@ final class RoundMapAtlas {
             worldKey = "";
             return;
         }
-        diskPath = pathFor(mc);
+        worldKey = currentWorldKey;
+        diskPath = RoundMapWorldIdentity.atlasPath(worldKey);
+        RoundMapTextures.invalidate();
         final Path source = diskPath;
         final String targetWorld = worldKey;
         IO.submit(() -> {
