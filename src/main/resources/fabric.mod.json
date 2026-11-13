@@ -3,7 +3,7 @@
  "id":"roundmap",
  "version":"${version}",
  "name":"RoundMap",
- "description":"Simple circular client-side terrain minimap, no entity radar.",
+ "description":"Circular minimap, persistent explored world map, waypoints and optional entity radar.",
  "environment":"client",
  "entrypoints":{"client":["dev.roundmap.RoundMapClient"]},
  "depends":{"fabricloader":">=0.18.0","minecraft":"1.21.11","java":">=21","fabric-api":"*"}
