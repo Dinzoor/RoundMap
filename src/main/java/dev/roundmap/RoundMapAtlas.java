@@ -87,6 +87,14 @@ final class RoundMapAtlas {
 
     // Directional hillshade with two neighbouring height samples; computed from
     // cached tiles, never from live blocks or chunks during rendering.
+    private static int mix(int a, int b, int percent) {
+        int inv = 100 - percent;
+        int r = (((a >> 16) & 255) * inv + ((b >> 16) & 255) * percent) / 100;
+        int g = (((a >> 8) & 255) * inv + ((b >> 8) & 255) * percent) / 100;
+        int blue = ((a & 255) * inv + (b & 255) * percent) / 100;
+        return 0xFF000000 | r << 16 | g << 8 | blue;
+    }
+
     static int shadedColorAt(int x, int z) {
         int color = colorAt(x, z);
         if (color == 0) return 0;
@@ -218,6 +226,24 @@ final class RoundMapAtlas {
             BlockState state = mc.level.getBlockState(ground);
             MapColor mapColor = state.getMapColor(mc.level, ground);
             int color = mapColor == MapColor.NONE ? 0xFF545C5C : mapColor.col | 0xFF000000;
+            // A lightweight biome-aware material palette. Capture only on the
+            // client tick; no live biome queries happen while drawing the map.
+            if (state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.MOSS_BLOCK)) {
+                String biome = mc.level.getBiome(ground).unwrapKey()
+                    .map(k -> k.identifier().getPath()).orElse("");
+                int tint = 0xFF679F3D;
+                if (biome.contains("jungle")) tint = 0xFF3A963E;
+                else if (biome.contains("swamp") || biome.contains("mangrove")) tint = 0xFF597C48;
+                else if (biome.contains("savanna") || biome.contains("badlands")) tint = 0xFFB2AD53;
+                else if (biome.contains("taiga") || biome.contains("old_growth")) tint = 0xFF648D63;
+                else if (biome.contains("cherry")) tint = 0xFF93B963;
+                else if (biome.contains("snow") || biome.contains("frozen")) tint = 0xFF9EBAA0;
+                color = mix(color, tint, 55);
+            } else if (state.is(Blocks.CHERRY_LEAVES)) color = 0xFFE4A3B9;
+            else if (state.is(Blocks.SPRUCE_LEAVES)) color = 0xFF3A6950;
+            else if (state.is(Blocks.BIRCH_LEAVES)) color = 0xFF7FB34E;
+            else if (state.is(Blocks.OAK_LEAVES) || state.is(Blocks.JUNGLE_LEAVES)
+                     || state.is(Blocks.DARK_OAK_LEAVES)) color = 0xFF397B3C;
             // Keep water blue and give shallow coasts a lighter shade.
             if (state.is(Blocks.WATER)) {
                 int bed = mc.level.getHeightmapPos(Heightmap.Types.OCEAN_FLOOR, pos).getY();
