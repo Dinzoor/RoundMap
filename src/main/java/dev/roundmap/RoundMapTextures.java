@@ -114,7 +114,9 @@ final class RoundMapTextures {
         final int padding = 256;
         int drawW = screenW + padding * 2;
         int drawH = screenH + padding * 2;
-        int tw = Math.min(640, Math.max(128, drawW));
+        // Higher-resolution terrain texture preserves individual terrain
+        // blocks at zoom, while the progressive builder caps CPU time.
+        int tw = Math.min(1024, Math.max(128, drawW));
         int th = Math.min(640, Math.max(128,
             (int)Math.round(tw * (drawH / (double)drawW))));
         FULL.allocate(tw, th);
