@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import net.fabricmc.loader.api.FabricLoader;
@@ -264,6 +265,17 @@ final class RoundMapAtlas {
                 System.err.println("[RoundMap] Unable to save explored terrain: " + e);
             }
         });
+    }
+
+    static void shutdown() {
+        saveAsync();
+        IO.shutdown();
+        try {
+            if (!IO.awaitTermination(3, TimeUnit.SECONDS)) IO.shutdownNow();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            IO.shutdownNow();
+        }
     }
 
     private RoundMapAtlas() {}
