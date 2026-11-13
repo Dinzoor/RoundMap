@@ -318,7 +318,7 @@ public final class RoundMapClient implements ClientModInitializer {
             (float)(miniSize * miniZoom / HALF), miniSize, miniSize, true);
         drawMarkers(g, mc, cx, cy, (float)(miniSize * miniZoom / HALF), miniSize,
             true, mc.player.getBlockX(), mc.player.getBlockZ());
-        pointer(g, mc, cx, cy);
+        playerArrow(g, mc, cx, cy);
         if (showCompass) g.drawCenteredString(mc.font, "N", cx, cy - miniSize - 11, -1);
         if (showCoords) g.drawCenteredString(mc.font,
             "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(),
@@ -350,12 +350,51 @@ public final class RoundMapClient implements ClientModInitializer {
         }
     }
 
-    private static void pointer(GuiGraphics g, Minecraft mc, int cx, int cy) {
-        g.fill(cx - 2, cy - 2, cx + 3, cy + 3, -1);
+    /**
+     * Draw a north-up player arrow on both map views. Minecraft yaw=0 faces
+     * south (+Z); screen maps +Z downward.
+     */
+    private static void playerArrow(GuiGraphics g, Minecraft mc, int cx, int cy) {
         double yaw = Math.toRadians(mc.player.getYRot());
-        int x = cx - (int)Math.round(Math.sin(yaw) * 9);
-        int y = cy + (int)Math.round(Math.cos(yaw) * 9);
-        g.fill(x - 2, y - 2, x + 3, y + 3, 0xFFFF5555);
+        double forwardX = -Math.sin(yaw), forwardY = Math.cos(yaw);
+        double sideX = forwardY, sideY = -forwardX;
+        drawArrowTriangle(g, cx, cy, forwardX, forwardY, sideX, sideY,
+            11, 7, 7, 0xFF12191E);
+        drawArrowTriangle(g, cx, cy, forwardX, forwardY, sideX, sideY,
+            8, 5, 4, 0xFFFFFFFF);
+    }
+
+    private static void drawArrowTriangle(GuiGraphics g, int cx, int cy,
+            double forwardX, double forwardY, double sideX, double sideY,
+            int tipLength, int backLength, int wingWidth, int color) {
+        int ax = cx + (int)Math.round(forwardX * tipLength);
+        int ay = cy + (int)Math.round(forwardY * tipLength);
+        int bx = cx - (int)Math.round(forwardX * backLength - sideX * wingWidth);
+        int by = cy - (int)Math.round(forwardY * backLength - sideY * wingWidth);
+        int dx = cx - (int)Math.round(forwardX * backLength + sideX * wingWidth);
+        int dy = cy - (int)Math.round(forwardY * backLength + sideY * wingWidth);
+        int minY = Math.min(ay, Math.min(by, dy));
+        int maxY = Math.max(ay, Math.max(by, dy));
+        int minX = Math.min(ax, Math.min(bx, dx));
+        int maxX = Math.max(ax, Math.max(bx, dx));
+        for (int y = minY; y <= maxY; y++) {
+            int run = Integer.MIN_VALUE;
+            for (int x = minX; x <= maxX + 1; x++) {
+                boolean inside = false;
+                if (x <= maxX) {
+                    int e1 = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+                    int e2 = (dx - bx) * (y - by) - (dy - by) * (x - bx);
+                    int e3 = (ax - dx) * (y - dy) - (ay - dy) * (x - dx);
+                    inside = (e1 >= 0 && e2 >= 0 && e3 >= 0)
+                        || (e1 <= 0 && e2 <= 0 && e3 <= 0);
+                }
+                if (inside && run == Integer.MIN_VALUE) run = x;
+                if (!inside && run != Integer.MIN_VALUE) {
+                    g.fill(run, y, x, y + 1, color);
+                    run = Integer.MIN_VALUE;
+                }
+            }
+        }
     }
 
     private static void outline(GuiGraphics g, int cx, int cy, int radius) {
@@ -423,8 +462,9 @@ public final class RoundMapClient implements ClientModInitializer {
                 false, targetX, targetZ);
             int playerX = cx + (int)Math.round((mc.player.getBlockX() - targetX) * mapZoom);
             int playerZ = cy + (int)Math.round((mc.player.getBlockZ() - targetZ) * mapZoom);
-            if (playerX > 0 && playerX < width && playerZ > 34 && playerZ < height)
-                g.fill(playerX - 3, playerZ - 3, playerX + 4, playerZ + 4, 0xFFFF5555);
+            if (playerX >= 12 && playerX < width - 12 &&
+                playerZ >= 47 && playerZ < height - 37)
+                playerArrow(g, mc, playerX, playerZ);
             g.fill(0, 0, width, 35, 0xB018222C);
             g.drawString(font, "RoundMap  •  Изучено чанков: " + RoundMapAtlas.exploredChunks(),
                 10, 12, 0xFFFFFFFF);
