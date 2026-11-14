@@ -169,6 +169,10 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final String[] MARKER_ICONS = {
         "W", "H", "B", "P", "!", "X", "T", "C", "M", "S", "*", "?"
     };
+    private static final String[] MARKER_ICON_NAMES = {
+        "Буквы", "Дом", "Кровать", "Портал", "Важное", "Крест",
+        "Инструменты", "Сундук", "Череп", "Звезда", "Особое", "Другое"
+    };
     private static final List<String> folders = new ArrayList<>();
     private record Marker(int x, int y, int z, String dimension, String name,
                           int color, int icon, String initials, String folder,
@@ -1336,8 +1340,27 @@ public final class RoundMapClient implements ClientModInitializer {
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
             g.fill(0, 0, width, height, 0xCD152029);
             super.render(g, mouseX, mouseY, delta);
-            g.drawCenteredString(font, "Иконки RoundMap: W, дом, кровать, портал, отметки...",
-                width / 2, height / 2 - 78, 0xFFFFFFFF);
+            int startX = width / 2 - 149, y = height / 2 - 55;
+            for (int i = 0; i < MARKER_ICONS.length; i++) {
+                int x = startX + (i % 6) * 50 + 24;
+                int yy = y + (i / 6) * 42 + 13;
+                Marker preview = new Marker(0, 64, 0, draft.dimension,
+                    "Образец", MARKER_COLORS[0], i, "", "Основная", true, false);
+                waypointPin(g, minecraft, x, yy, preview, true);
+                if (draft.icon == i) {
+                    g.fill(x - 21, yy - 19, x + 22, yy - 18, 0xFFFFFFFF);
+                }
+            }
+            int col = (mouseX - startX) / 50, row = (mouseY - y) / 42;
+            int selection = row * 6 + col;
+            if (mouseX >= startX && col >= 0 && col < 6 &&
+                row >= 0 && row < 2 && selection < MARKER_ICON_NAMES.length) {
+                g.drawCenteredString(font, MARKER_ICON_NAMES[selection],
+                    width / 2, y - 21, 0xFFFFFFFF);
+            } else {
+                g.drawCenteredString(font, "Выберите иконку точки",
+                    width / 2, y - 21, 0xFFFFFFFF);
+            }
         }
     }
 
