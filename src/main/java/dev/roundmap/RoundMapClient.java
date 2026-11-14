@@ -208,7 +208,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 @Override public Identifier getFabricId() {
                     return Identifier.fromNamespaceAndPath("roundmap", "block_palette");
                 }
-                @Override public void reload(ResourceManager manager) {
+                @Override public void onResourceManagerReload(ResourceManager manager) {
                     RoundMapBlockPalette.clear();
                     Minecraft client = Minecraft.getInstance();
                     client.execute(() -> RoundMapAtlas.onResourcePackReload());
