@@ -392,31 +392,33 @@ final class RoundMapAtlas {
     }
 
     private static boolean nextTile(Minecraft mc) {
-        for (int i = 0; i < 750; i++) {
-            boolean coarse;
+        for (int i = 0; i < 1800; i++) {
+            int stage;
             Long next;
+            // Prioritize immediate previews near the player, then quickly
+            // sketch the entire visible world before refining every pixel.
             if (!nearbyCoarse.isEmpty()) {
-                coarse = true;
-                next = nearbyCoarse.pollFirst();
-            } else if (!nearbyFine.isEmpty()) {
-                coarse = false;
-                next = nearbyFine.pollFirst();
+                stage = 1; next = nearbyCoarse.pollFirst();
+            } else if (!nearbyMedium.isEmpty()) {
+                stage = 2; next = nearbyMedium.pollFirst();
             } else if (!coarseQueue.isEmpty()) {
-                coarse = true;
-                next = coarseQueue.pollFirst();
+                stage = 1; next = coarseQueue.pollFirst();
+            } else if (!nearbyFine.isEmpty()) {
+                stage = 3; next = nearbyFine.pollFirst();
+            } else if (!mediumQueue.isEmpty()) {
+                stage = 2; next = mediumQueue.pollFirst();
             } else {
-                coarse = false;
-                next = fineQueue.pollFirst();
+                stage = 3; next = fineQueue.pollFirst();
             }
             if (next == null) return false;
             Tile t = tiles.get(next);
-            if (t != null && t.stage >= (coarse ? 1 : 2)) continue;
+            if (t != null && t.stage >= stage) continue;
             int tx = (int)(next >> 32), tz = (int)(long)next;
-            // hasChunkAt does NOT request or generate an unloaded chunk.
+            // No disk load or world generation is triggered by hasChunkAt.
             if (!mc.level.hasChunkAt(new BlockPos(tx * 16, 0, tz * 16))) continue;
             active = next;
             activeIndex = 0;
-            activeStep = coarse ? 4 : 1;
+            activeStep = stage == 1 ? 16 : stage == 2 ? 4 : 1;
             return true;
         }
         return false;
@@ -429,11 +431,8 @@ final class RoundMapAtlas {
         nearbyFine.clear();
         mediumQueue.clear();
         fineQueue.clear();
-        // Keep the currently progressing chunk: rescheduling every three
-        // seconds used to restart its 256 samples forever at low settings.
-        // Explore near the player first so the high-resolution map appears
-        // where they are standing; only then fill the distant rendered ring.
-        // Every scan is restricted to chunks inside the view-distance circle.
+        // Don't interrupt the active chunk when the camera moves or a new
+        // batch of loaded chunks arrives; that caused never-ending repeats.
         for (int radius = 0; radius <= viewRadius; radius++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dx = -radius; dx <= radius; dx++) {
@@ -444,15 +443,13 @@ final class RoundMapAtlas {
                     if (dx * dx + dz * dz > outer * outer) continue;
                     long k = key(centerX + dx, centerZ + dz);
                     Tile tile = tiles.get(k);
-                    boolean near = radius <= 2;
-                    if (tile == null || tile.stage == 0) {
-                        (near ? nearbyCoarse : coarseQueue).addLast(k);
-                    }
-                    // Refine every visited chunk, not just a 4-chunk radius:
-                    // distant regions previously stayed coarse forever.
-                    if (detailed && (tile == null || tile.stage < 2)) {
-                        (radius <= 1 ? nearbyFine : fineQueue).addLast(k);
-                    }
+                    int stage = tile == null ? 0 : tile.stage;
+                    if (stage == 0)
+                        (radius <= 2 ? nearbyCoarse : coarseQueue).addLast(k);
+                    if (detailed && stage < 2)
+                        (radius <= 1 ? nearbyMedium : mediumQueue).addLast(k);
+                    if (detailed && stage < 3)
+                        (radius <= 2 ? nearbyFine : fineQueue).addLast(k);
                 }
             }
         }
