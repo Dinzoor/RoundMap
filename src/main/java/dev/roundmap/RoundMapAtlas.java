@@ -30,11 +30,12 @@ import net.minecraft.world.level.material.MapColor;
  * Disk compression runs on one daemon worker without touching Minecraft levels.
  */
 final class RoundMapAtlas {
-    private static final int MAGIC = 0x524D4133; // RMA3 stores terrain height
-    private static final int OLD_MAGIC = 0x524D4132; // backward compatible
+    private static final int MAGIC = 0x524D4134; // RMA4: preview, medium and full
+    private static final int OLD_MAGIC = 0x524D4133; // RMA3: medium and full
+    private static final int LEGACY_MAGIC = 0x524D4132; // RMA2: no height data
     // Survey only chunks actually within the player's configured view distance.
     private static final int MAX_VISIBLE_RADIUS = 12;
-    static int readsPerTick = 8;
+    static int readsPerTick = 96;
     static boolean detailed = true;
     static boolean contours = true;
     static boolean relief = true;
@@ -46,8 +47,10 @@ final class RoundMapAtlas {
     });
     private static final Map<Long, Tile> tiles = new HashMap<>();
     private static final ArrayDeque<Long> nearbyCoarse = new ArrayDeque<>();
-    private static final ArrayDeque<Long> nearbyFine = new ArrayDeque<>();
+    private static final ArrayDeque<Long> nearbyMedium = new ArrayDeque<>();
     private static final ArrayDeque<Long> coarseQueue = new ArrayDeque<>();
+    private static final ArrayDeque<Long> nearbyFine = new ArrayDeque<>();
+    private static final ArrayDeque<Long> mediumQueue = new ArrayDeque<>();
     private static final ArrayDeque<Long> fineQueue = new ArrayDeque<>();
     private static Object world;
     private static String worldKey = "";
@@ -63,7 +66,7 @@ final class RoundMapAtlas {
     private static final class Tile {
         final int[] pixels = new int[256];
         final short[] heights = new short[256];
-        int stage; // 0 unknown, 1 coarse, 2 full detail
+        int stage; // 0 unknown, 1 preview, 2 medium 4x4, 3 full 16x16
         Tile() { Arrays.fill(heights, Short.MIN_VALUE); }
         Tile(int stage, int[] colors, short[] h) {
             this();
@@ -77,10 +80,12 @@ final class RoundMapAtlas {
     static void onResourcePackReload() {
         // Preserve explored tiles. Force re-refinement when they become
         // visible, rather than erasing saved exploration on every F3+T.
-        for (Tile t : tiles.values()) if (t.stage == 2) t.stage = 1;
+        for (Tile t : tiles.values()) if (t.stage == 3) t.stage = 2;
         nearbyCoarse.clear();
-        nearbyFine.clear();
+        nearbyMedium.clear();
         coarseQueue.clear();
+        nearbyFine.clear();
+        mediumQueue.clear();
         fineQueue.clear();
         active = Long.MIN_VALUE;
         forceRefresh();
@@ -159,8 +164,10 @@ final class RoundMapAtlas {
         saveAsync();
         tiles.clear();
         nearbyCoarse.clear();
-        nearbyFine.clear();
+        nearbyMedium.clear();
         coarseQueue.clear();
+        nearbyFine.clear();
+        mediumQueue.clear();
         fineQueue.clear();
         active = Long.MIN_VALUE;
         lastViewRadius = -1;
@@ -185,7 +192,7 @@ final class RoundMapAtlas {
             if (Files.isRegularFile(source)) {
                 try (DataInputStream in = new DataInputStream(new GZIPInputStream(Files.newInputStream(source)))) {
                     int version = in.readInt();
-                    if (version != MAGIC && version != OLD_MAGIC) return;
+                    if (version != MAGIC && version != OLD_MAGIC && version != LEGACY_MAGIC) return;
                     int count = in.readInt();
                     if (count < 0 || count > 40000) return;
                     for (int i = 0; i < count; i++) {
@@ -194,12 +201,17 @@ final class RoundMapAtlas {
                         int[] colors = new int[256];
                         for (int p = 0; p < 256; p++) colors[p] = in.readInt();
                         short[] heights = null;
-                        if (version == MAGIC) {
+                        if (version == MAGIC || version == OLD_MAGIC) {
                             heights = new short[256];
                             for (int p = 0; p < 256; p++) heights[p] = in.readShort();
-                        } else if (stage == 2) {
-                            // Preserve old colors but rebuild detailed relief.
-                            stage = 1;
+                        }
+                        if (version == OLD_MAGIC) {
+                            // Old stage 1 already contained 4x4 data;
+                            // old stage 2 already contained 16x16 detail.
+                            stage = stage == 1 ? 2 : stage == 2 ? 3 : stage;
+                        } else if (version == LEGACY_MAGIC) {
+                            // Heightless files always need refinement.
+                            stage = stage > 0 ? 2 : 0;
                         }
                         boolean invalid = false;
                         for (int p = 0; p < 256; p++) {
@@ -242,27 +254,34 @@ final class RoundMapAtlas {
             mc.options.renderDistance().get() - 1));
         long now = System.nanoTime();
         if (cx != lastChunkX || cz != lastChunkZ || viewRadius != lastViewRadius
-            || now - lastRefresh > 3_000_000_000L) {
+            || now - lastRefresh > 1_000_000_000L) {
             rebuildQueues(cx, cz, viewRadius);
             lastRefresh = now;
             lastChunkX = cx;
             lastChunkZ = cz;
             lastViewRadius = viewRadius;
         }
-        int budget = readsPerTick;
-        while (budget > 0) {
+        // Main-thread chunk reads get a fixed time slice to protect FPS.
+        long deadline = System.nanoTime() + 4_000_000L;
+        int budget = Math.max(16, readsPerTick);
+        boolean first = true;
+        while (budget > 0 && (first || System.nanoTime() < deadline)) {
+            first = false;
             if (active == Long.MIN_VALUE && !nextTile(mc)) break;
             int tileX = (int)(active >> 32), tileZ = (int)active;
             Tile tile = tiles.computeIfAbsent(active, k -> new Tile());
-            if (activeIndex >= (activeStep == 4 ? 16 : 256)) {
-                tile.stage = Math.max(tile.stage, activeStep == 4 ? 1 : 2);
+            if (activeIndex >= (activeStep == 16 ? 1 : activeStep == 4 ? 16 : 256)) {
+                tile.stage = Math.max(tile.stage, activeStep == 16 ? 1 : activeStep == 4 ? 2 : 3);
                 active = Long.MIN_VALUE;
                 revision++;
                 dirty = true;
                 continue;
             }
             int localX, localZ;
-            if (activeStep == 4) {
+            if (activeStep == 16) {
+                localX = 8;
+                localZ = 8;
+            } else if (activeStep == 4) {
                 localX = (activeIndex % 4) * 4 + 2;
                 localZ = (activeIndex / 4) * 4 + 2;
             } else {
@@ -308,8 +327,12 @@ final class RoundMapAtlas {
                     continue;
                 }
             }
-            int color = RoundMapBlockPalette.color(mc, state, ground,
-                mapColor == MapColor.NONE ? 0 : mapColor.col | 0xFF000000);
+            // Preview avoids costly texture lookups; later passes use
+            // active resource-pack top-face models for full detail.
+            int color = activeStep == 16 && mapColor != MapColor.NONE
+                ? mapColor.col | 0xFF000000
+                : RoundMapBlockPalette.color(mc, state, ground,
+                    mapColor == MapColor.NONE ? 0 : mapColor.col | 0xFF000000);
             // A lightweight biome-aware material palette. Capture only on the
             // client tick; no live biome queries happen while drawing the map.
             if (state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.MOSS_BLOCK)) {
@@ -341,7 +364,10 @@ final class RoundMapAtlas {
             color = 0xFF000000 | (r << 16) | (g << 8) | b;
             short altitude = (short)Math.max(Short.MIN_VALUE + 1,
                 Math.min(Short.MAX_VALUE, ground.getY()));
-            if (activeStep == 4) {
+            if (activeStep == 16) {
+                Arrays.fill(tile.pixels, color);
+                Arrays.fill(tile.heights, altitude);
+            } else if (activeStep == 4) {
                 int baseX = localX - 2, baseZ = localZ - 2;
                 for (int dz = 0; dz < 4; dz++)
                     for (int dx = 0; dx < 4; dx++) {
@@ -398,8 +424,10 @@ final class RoundMapAtlas {
 
     private static void rebuildQueues(int centerX, int centerZ, int viewRadius) {
         nearbyCoarse.clear();
-        nearbyFine.clear();
+        nearbyMedium.clear();
         coarseQueue.clear();
+        nearbyFine.clear();
+        mediumQueue.clear();
         fineQueue.clear();
         // Keep the currently progressing chunk: rescheduling every three
         // seconds used to restart its 256 samples forever at low settings.
