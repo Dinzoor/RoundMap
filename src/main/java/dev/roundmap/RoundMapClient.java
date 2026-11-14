@@ -1240,6 +1240,19 @@ public final class RoundMapClient implements ClientModInitializer {
                 g.drawCenteredString(font, "ЛКМ: предыдущая  •  ПКМ: следующая",
                     width / 2, 171, 0xFFCCCCCC);
             }
+            if (tab == 0 && height >= 400) {
+                // Preview uses the actual minimap radius, so the cached
+                // frame texture can be reused without reallocating it.
+                int x = width / 2, y = height / 2 + 35, r = miniSize;
+                for (int dy = -r; dy <= r; dy++) {
+                    int extent = (int)Math.sqrt(r * r - dy * dy);
+                    g.fill(x - extent, y + dy, x + extent + 1, y + dy + 1,
+                        ((dy / 8) & 1) == 0 ? 0xFF4F7964 : 0xFF698A74);
+                }
+                RoundMapTextures.drawFrame(g, x, y, r, frameStyle);
+                g.drawCenteredString(font, "Предпросмотр рамки",
+                    x, y + r + 16, 0xFFE2E7EC);
+            }
             if (tab == 2)
                 g.drawCenteredString(font, "Белым или тёмным цветом скрыты неизученные участки",
                     width / 2, height / 2, 0xFFCCCCCC);
