@@ -55,6 +55,9 @@ public final class RoundMapClient implements ClientModInitializer {
     private static String biomeLabel = "";
     private static long biomeRefreshAt;
     static int miniOpacity = 100;
+    private static final int[] ARROW_COLORS = {0xFFFF4848, 0xFF4BC9FF, 0xFFFFD54D, 0xFFFFFFFF};
+    private static final String[] ARROW_COLOR_NAMES = {"Красный", "Голубой", "Жёлтый", "Белый"};
+    private static int arrowColorIndex = 0;
     private static int worldMarkerDistance = 1500;
     static boolean brightFog = true;
     private static int miniSize = 48, mapZoom = 3;
@@ -95,6 +98,11 @@ public final class RoundMapClient implements ClientModInitializer {
                 ? Boolean.parseBoolean(p.getProperty("detailed", "true")) : true;
             RoundMapAtlas.contours = Boolean.parseBoolean(p.getProperty("contours", "true"));
             RoundMapAtlas.relief = Boolean.parseBoolean(p.getProperty("relief", "true"));
+            RoundMapAtlas.lighting = Boolean.parseBoolean(p.getProperty("lighting", "true"));
+            RoundMapAtlas.timeMode = Math.max(0, Math.min(2,
+                Integer.parseInt(p.getProperty("timeMode", "0"))));
+            arrowColorIndex = Math.max(0, Math.min(ARROW_COLORS.length - 1,
+                Integer.parseInt(p.getProperty("arrowColor", "0"))));
             RoundMapRadar.players = Boolean.parseBoolean(p.getProperty("radarPlayers", "true"));
             RoundMapRadar.hostile = Boolean.parseBoolean(p.getProperty("radarHostile", "false"));
             RoundMapRadar.passive = Boolean.parseBoolean(p.getProperty("radarPassive", "false"));
@@ -127,6 +135,9 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("detailed", Boolean.toString(RoundMapAtlas.detailed));
         p.setProperty("contours", Boolean.toString(RoundMapAtlas.contours));
         p.setProperty("relief", Boolean.toString(RoundMapAtlas.relief));
+        p.setProperty("lighting", Boolean.toString(RoundMapAtlas.lighting));
+        p.setProperty("timeMode", Integer.toString(RoundMapAtlas.timeMode));
+        p.setProperty("arrowColor", Integer.toString(arrowColorIndex));
         p.setProperty("radarPlayers", Boolean.toString(RoundMapRadar.players));
         p.setProperty("radarHostile", Boolean.toString(RoundMapRadar.hostile));
         p.setProperty("radarPassive", Boolean.toString(RoundMapRadar.passive));
@@ -446,7 +457,7 @@ public final class RoundMapClient implements ClientModInitializer {
         // Balanced size: twice the tiny alpha.6 pointer, half its former size.
         arrowShape(g, cx + 1, cy + 1, fx, fy, sx, sy, 0.625, 0xFF131923);
         arrowShape(g, cx, cy, fx, fy, sx, sy, 0.57, 0xFF151619);
-        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.50, 0xFFFF4848);
+        arrowShape(g, cx, cy, fx, fy, sx, sy, 0.50, ARROW_COLORS[arrowColorIndex]);
         arrowShape(g, cx, cy, fx, fy, sx, sy, 0.365, 0xFFFFFFFF);
     }
 
@@ -827,6 +838,20 @@ public final class RoundMapClient implements ClientModInitializer {
                         RoundMapAtlas.readsPerTick < 64 ? 64 :
                         RoundMapAtlas.readsPerTick < 128 ? 128 : 256;
                         savePosition(); });
+                String timeLabel = RoundMapAtlas.timeMode == 0 ? "По миру" :
+                    RoundMapAtlas.timeMode == 1 ? "День" : "Ночь";
+                option(right, top, cw, "Время на карте: " + timeLabel, () -> {
+                    RoundMapAtlas.timeMode = (RoundMapAtlas.timeMode + 1) % 3;
+                    RoundMapTextures.invalidate(); savePosition();
+                });
+                option(right, top + step, cw, "Освещение: " + (RoundMapAtlas.lighting ? "Вкл" : "Выкл"),
+                    () -> { RoundMapAtlas.lighting = !RoundMapAtlas.lighting;
+                        RoundMapTextures.invalidate(); savePosition(); });
+                option(left, top + step * 2, cw,
+                    "Стрелка: " + ARROW_COLOR_NAMES[arrowColorIndex], () -> {
+                    arrowColorIndex = (arrowColorIndex + 1) % ARROW_COLORS.length;
+                    savePosition();
+                });
             }
             addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
                 minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
@@ -838,7 +863,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 g.drawCenteredString(font, "Белым или тёмным цветом скрыты неизученные участки",
                     width / 2, height / 2, 0xFFCCCCCC);
             if (tab == 4)
-                g.drawCenteredString(font, "Для высокого FPS выбери Быстро и 2-4 блока/тик",
+                g.drawCenteredString(font, "Сканирование ограничено 4 мс за тик для защиты FPS",
                     width / 2, height / 2 + 25, 0xFFCCCCCC);
         }
     }
