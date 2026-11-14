@@ -124,12 +124,20 @@ final class RoundMapAtlas {
         BlockPos p = new BlockPos(x, 0, z);
         if (!mc.level.hasChunkAt(p))
             return "RoundMap X=" + x + " Z=" + z + ": chunk not loaded";
-        BlockPos surface = mc.level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, p).below();
-        BlockState state = mc.level.getBlockState(surface);
+        BlockPos top = mc.level.getHeightmapPos(
+            Heightmap.Types.WORLD_SURFACE, p).below();
+        BlockState topState = mc.level.getBlockState(top);
+        BlockPos surface = actualSurface(mc, p);
         Tile tile = tiles.get(key(x >> 4, z >> 4));
         int stage = tile == null ? 0 : tile.stage;
         int stored = colorAt(x, z);
+        if (surface == null) {
+            return "RoundMap X=" + x + " Z=" + z +
+                " top=" + topState + " skipped=48+ (no valid surface)";
+        }
+        BlockState state = mc.level.getBlockState(surface);
         return "RoundMap X=" + x + " Y=" + surface.getY() + " Z=" + z +
+            " top=" + topState + " skipped=" + (top.getY() - surface.getY()) +
             " stage=" + stage + " cache=#" +
             String.format("%06X", stored & 0xFFFFFF) + " " +
             RoundMapBlockPalette.diagnose(mc, state, surface);
@@ -188,6 +196,32 @@ final class RoundMapAtlas {
         int g = (color >>> 8) & 255;
         int b = color & 255;
         return r >= 59 && r <= 109 && g - r == 8 && b == g;
+    }
+
+    /**
+     * WORLD_SURFACE includes every non-air block, including invisible barrier
+     * layers used by servers. Render the first real block underneath these
+     * technical layers, not their placeholder particle/item textures.
+     */
+    private static boolean invisibleTechnicalBlock(BlockState state) {
+        return state.is(Blocks.BARRIER) ||
+            state.is(Blocks.LIGHT) ||
+            state.is(Blocks.STRUCTURE_VOID);
+    }
+
+    private static BlockPos actualSurface(Minecraft mc, BlockPos at) {
+        BlockPos ground = mc.level.getHeightmapPos(
+            Heightmap.Types.WORLD_SURFACE, at).below();
+        // Usually one or two barriers. The bounded search also handles
+        // multi-layer server protection while keeping sampling inexpensive.
+        for (int depth = 0; depth < 48; depth++) {
+            BlockState state = mc.level.getBlockState(ground);
+            if (!invisibleTechnicalBlock(state)) return ground;
+            if (ground.getY() <= mc.level.getMinY()) return null;
+            ground = ground.below();
+        }
+        // A 48+ block deep invisible structure is not a known surface.
+        return null;
     }
 
     private static long key(int cx, int cz) {
@@ -421,7 +455,13 @@ final class RoundMapAtlas {
                 continue;
             }
             BlockPos pos = new BlockPos(x, 0, z);
-            BlockPos ground = mc.level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, pos).below();
+            BlockPos ground = actualSurface(mc, pos);
+            if (ground == null) {
+                // Do not overwrite previous explored colors with a barrier
+                // texture, or mark this chunk complete using unknown pixels.
+                active = Long.MIN_VALUE;
+                continue;
+            }
             BlockState state = mc.level.getBlockState(ground);
             // An unloaded/placeholder chunk can report a height below the
             // actual world. Do not turn void air into a dark gray map tile.
@@ -443,7 +483,7 @@ final class RoundMapAtlas {
                 for (int depth = 1; depth <= 6 && mapColor == MapColor.NONE && !hasTexture; depth++) {
                     BlockPos lower = ground.below(depth);
                     BlockState candidate = mc.level.getBlockState(lower);
-                    if (!candidate.isAir()) {
+                    if (!candidate.isAir() && !invisibleTechnicalBlock(candidate)) {
                         MapColor sample = candidate.getMapColor(mc.level, lower);
                         if (sample != MapColor.NONE) {
                             ground = lower;
@@ -473,7 +513,7 @@ final class RoundMapAtlas {
                     BlockPos lower = ground.below(depth);
                     if (lower.getY() < mc.level.getMinY()) break;
                     BlockState below = mc.level.getBlockState(lower);
-                    if (below.isAir()) continue;
+                    if (below.isAir() || invisibleTechnicalBlock(below)) continue;
                     MapColor belowMap = below.getMapColor(mc.level, lower);
                     int belowColor = RoundMapBlockPalette.color(mc, below, lower,
                         belowMap == MapColor.NONE ? 0 :
