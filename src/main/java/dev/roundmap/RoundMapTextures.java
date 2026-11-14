@@ -19,6 +19,8 @@ final class RoundMapTextures {
         previewBuild = null;
     }
     private static final Image MINI = new Image("roundmap_minimap");
+    private static final Image FRAME = new Image("roundmap_minimap_frame");
+    private static int frameStyleKey = -1, frameRadiusKey = -1;
     private static final Image FULL = new Image("roundmap_fullmap");
     private static final Image PREVIEW = new Image("roundmap_preview");
 
@@ -84,6 +86,77 @@ final class RoundMapTextures {
         }
     }
 
+    /**
+     * Five unique pixel-art frame styles plus no frame. A precomputed
+     * transparent texture costs just ONE GUI quad per frame and is recreated
+     * only when size/style changes; no expensive per-frame circle loops.
+     */
+    private static int framePixel(int style, int dx, int dy, int radius) {
+        double distance = Math.sqrt((double)dx * dx + (double)dy * dy);
+        double ring = distance - radius;
+        if (ring < -2.6 || ring > 6.0) return 0;
+        boolean topLeft = dx + dy < 0;
+        int hash = (dx * 347 + dy * 907 + dx * dy * 17);
+        switch (style) {
+            case 1: // Classic: thin polished silver with a dark outline.
+                if (ring > 3.5) return 0;
+                if (ring > 2.5 || ring < -1.7) return 0xFF1B242D;
+                if (ring > 1.2) return 0xFF657886;
+                return topLeft ? 0xFFF5F9FB : 0xFFAEBEC8;
+            case 2: // Minecraft stone: chunky mottled pixel blocks.
+                if (ring > 5.1) return 0;
+                if (ring > 3.8 || ring < -1.9) return 0xFF1D2229;
+                if (ring > 2.6) return 0xFF56575A;
+                if (((dx * 23 + dy * 7) & 15) < 2) return 0xFF32343A;
+                return (hash & 7) < 3 ? 0xFF94979A : 0xFF73787A;
+            case 3: // Neon: turquoise main line and transparent outer glow.
+                if (ring > 4.7) return 0;
+                if (ring > 2.5) return 0x434BDEFF;
+                if (ring > 0.4) return topLeft ? 0xFF92FAFF : 0xFF28BAF9;
+                if (ring > -1.7) return 0xFF113A56;
+                return 0;
+            case 4: // Gilded rim: dark trim, copper shadows and gold shine.
+                if (ring > 4.5) return 0;
+                if (ring > 3.4 || ring < -1.8) return 0xFF21180E;
+                if (ring > 2.4) return 0xFF8A541D;
+                if (ring > 0.7) return 0xFFDEA633;
+                return topLeft ? 0xFFFFE48B : 0xFFBB7E22;
+            case 5: // Technical: graphite band with segmented cyan ticks.
+                if (ring > 5.0) return 0;
+                if (ring > 3.6 || ring < -2.0) return 0xFF0B1C2B;
+                double angle = Math.atan2(dy, dx);
+                int sector = (int)Math.floor((angle + Math.PI) * 24 /
+                    (Math.PI * 2));
+                boolean ticks = Math.floorMod(sector, 3) == 0;
+                if (ring > 1.3) return ticks ? 0xFF2CE6FF : 0xFF294B64;
+                if (ring > -0.5) return 0xFF141B29;
+                return ticks ? 0xFFB9F7FF : 0xFF697D91;
+            default:
+                return 0;
+        }
+    }
+
+    static void drawFrame(GuiGraphics g, int cx, int cy, int radius, int style) {
+        if (style <= 0) return;
+        int size = (radius + 9) * 2;
+        FRAME.allocate(size, size);
+        if (frameStyleKey != style || frameRadiusKey != radius) {
+            int middle = size / 2;
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    FRAME.pixels.setPixel(x, y,
+                        framePixel(style, x - middle, y - middle, radius));
+                }
+            }
+            FRAME.texture.upload();
+            frameStyleKey = style;
+            frameRadiusKey = radius;
+        }
+        g.blit(RenderPipelines.GUI_TEXTURED, FRAME.id,
+            cx - size / 2, cy - size / 2, 0f, 0f,
+            size, size, size, size, size, size);
+    }
+
     // Keep a fractional camera anchor for the HUD map. The old code used
     // integer block coordinates and refreshed once every 240 ms, causing
     // visible jumps whenever the player walked across block boundaries.
@@ -92,7 +165,10 @@ final class RoundMapTextures {
 
     static void minimap(GuiGraphics g, int cx, int cy, int radius,
                         double zoom, double cameraX, double cameraZ) {
-        final int pixels = 96;
+        // Render at the HUD's exact pixel dimensions, without resizing a
+        // fixed 96x96 image. This removes avoidable blur for 36/60px circles
+        // and retains pixel-art clarity with all border styles.
+        final int pixels = Math.max(2, radius * 2);
         MINI.allocate(pixels, pixels);
         final int zoomKey = (int)Math.round(zoom * 1000);
         final int revision = RoundMapAtlas.revision();
@@ -159,7 +235,7 @@ final class RoundMapTextures {
         }
         g.blit(RenderPipelines.GUI_TEXTURED, MINI.id,
             cx - radius, cy - radius, 0f, 0f,
-            radius * 2, radius * 2, pixels, pixels, pixels, pixels);
+            pixels, pixels, pixels, pixels, pixels, pixels);
     }
 
     private static int colorForFullMap(int worldX, int worldZ) {
