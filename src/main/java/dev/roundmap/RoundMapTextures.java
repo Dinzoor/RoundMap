@@ -103,15 +103,17 @@ final class RoundMapTextures {
         boolean settingsChanged = zoomKey != MINI.zoomKey ||
             miniPixelKey != pixelSize || miniOpacityKey != opacity;
         boolean cameraChanged = !Double.isFinite(sampledMiniX) ||
-            Math.hypot(cameraX - sampledMiniX, cameraZ - sampledMiniZ) > .04;
+            Math.hypot(cameraX - sampledMiniX, cameraZ - sampledMiniZ) > .012;
         boolean terrainChanged = MINI.revision != revision;
-        // Cap GPU uploads to ~30 Hz even on high-FPS clients. This is far
-        // smoother than 240 ms without re-rendering 96x96 every game frame.
+        // Allow up to ~60 fps of minimap movement (alpha.13 used 30).
+        // Skip redraws while camera and terrain are unchanged to save FPS.
         boolean refresh = MINI.updatedAt == 0 || settingsChanged ||
-            (elapsed >= 33_000_000L && cameraChanged) ||
-            (elapsed >= 110_000_000L && terrainChanged);
+            (elapsed >= 16_666_667L && cameraChanged) ||
+            (elapsed >= 100_000_000L && terrainChanged);
         if (refresh) {
-            double range = 48.0 / Math.max(.05, zoom);
+            // Radius is measured in screen pixels. At zoom=5 every block
+            // occupies exactly five pixels, regardless of circle size.
+            double range = radius / Math.max(.05, zoom);
             int step = Math.max(1, pixelSize);
             int alpha = Math.max(0, Math.min(255, opacity * 255 / 100));
             int previousWz = Integer.MIN_VALUE;
