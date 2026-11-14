@@ -27,7 +27,10 @@ import net.minecraft.world.level.block.state.BlockState;
  * the atlas' bounded client-tick sampler. Model and image results are cached.
  */
 final class RoundMapBlockPalette {
-    private static final Map<BlockState, Identifier> spriteForState = new HashMap<>();
+    // Many server resource packs select model variants using position seeds.
+    // A single sprite cached per BlockState incorrectly paints entire areas
+    // the same color. Retain 16 independently selected variants per state.
+    private static final Map<BlockState, Identifier[]> spriteForState = new HashMap<>();
     private static final Map<Identifier, TextureSample> samples = new HashMap<>();
     private static final Identifier NO_SPRITE = Identifier.fromNamespaceAndPath("roundmap", "none");
     private static Object lastResources;
@@ -47,10 +50,13 @@ final class RoundMapBlockPalette {
             samples.clear();
             lastResources = resourceManager;
         }
-        Identifier spriteName = spriteForState.get(state);
+        Identifier[] variants = spriteForState.computeIfAbsent(
+            state, ignored -> new Identifier[16]);
+        int variant = (int)(state.getSeed(pos) & 15);
+        Identifier spriteName = variants[variant];
         if (spriteName == null) {
             spriteName = findSprite(mc, state, pos);
-            spriteForState.put(state, spriteName == null ? NO_SPRITE : spriteName);
+            variants[variant] = spriteName == null ? NO_SPRITE : spriteName;
         }
         if (spriteName == null || spriteName.equals(NO_SPRITE)) return fallback;
         TextureSample sample;
@@ -86,36 +92,62 @@ final class RoundMapBlockPalette {
         return samples.get(name);
     }
 
+    private static double topFaceArea(BakedQuad q) {
+        // The 2D area of its upward-facing model quad. Selecting the
+        // dominant horizontal face avoids grabbing a tiny decorative
+        // overlay or a side texture from multipart server blocks.
+        double x0=q.position0().x(), z0=q.position0().z();
+        double x1=q.position1().x(), z1=q.position1().z();
+        double x2=q.position2().x(), z2=q.position2().z();
+        double x3=q.position3().x(), z3=q.position3().z();
+        return Math.abs(x0*z1+x1*z2+x2*z3+x3*z0
+            -z0*x1-z1*x2-z2*x3-z3*x0)*.5;
+    }
+
     private static Identifier findSprite(Minecraft mc, BlockState state, BlockPos pos) {
         try {
             BlockStateModel model = mc.getBlockRenderer().getBlockModel(state);
             List<BlockModelPart> parts =
                 model.collectParts(RandomSource.create(state.getSeed(pos)));
-            LinkedHashSet<Identifier> candidates = new LinkedHashSet<>();
-            // A top-down map prefers upward faces; a custom block may have
-            // multiple layers and use a placeholder texture on the first one.
+            Map<Identifier, Double> topAreas = new HashMap<>();
+            LinkedHashSet<Identifier> fallbackFaces = new LinkedHashSet<>();
             for (BlockModelPart part : parts) {
+                // CULLED UP quads are only one possible source of the
+                // visible top face. Most custom top faces are UNCULLED.
                 for (BakedQuad quad : part.getQuads(Direction.UP))
-                    candidates.add(quad.sprite().contents().name());
+                    topAreas.merge(quad.sprite().contents().name(),
+                        Math.max(.01, topFaceArea(quad)), Double::sum);
+                for (BakedQuad quad : part.getQuads(null)) {
+                    Identifier sprite = quad.sprite().contents().name();
+                    if (quad.direction() == Direction.UP)
+                        topAreas.merge(sprite,
+                            Math.max(.01, topFaceArea(quad)), Double::sum);
+                    else fallbackFaces.add(sprite);
+                }
             }
-            // Some custom multipart models have no culled UP quads.
-            for (BlockModelPart part : parts) {
-                for (BakedQuad quad : part.getQuads(null))
-                    candidates.add(quad.sprite().contents().name());
+            // Prefer large upward faces with loadable non-placeholder
+            // textures; these match the textures players see from above.
+            Identifier best = null;
+            double bestArea = -1;
+            for (Map.Entry<Identifier, Double> entry : topAreas.entrySet()) {
+                Identifier id = entry.getKey();
+                if (id.getPath().contains("missingno")) continue;
+                TextureSample sample = sampleFor(mc, id);
+                if (sample == null || suspiciousMissingSample(sample)) continue;
+                if (entry.getValue() > bestArea) {
+                    bestArea = entry.getValue();
+                    best = id;
+                }
             }
+            if (best != null) return best;
             TextureAtlasSprite icon = model.particleIcon();
-            if (icon != null) candidates.add(icon.contents().name());
-            Identifier firstReadable = null;
-            for (Identifier candidate : candidates) {
-                if (candidate.getPath().contains("missingno")) continue;
-                TextureSample sample = sampleFor(mc, candidate);
-                if (sample == null) continue;
-                if (firstReadable == null) firstReadable = candidate;
-                if (!suspiciousMissingSample(sample)) return candidate;
+            if (icon != null) fallbackFaces.add(icon.contents().name());
+            for (Identifier id : fallbackFaces) {
+                if (id.getPath().contains("missingno")) continue;
+                TextureSample sample = sampleFor(mc, id);
+                if (sample != null && !suspiciousMissingSample(sample)) return id;
             }
-            // Prefer fallback MapColor if every candidate is a
-            // missing-placeholder asset, not a red false positive.
-            return firstReadable == null ? null : firstReadable;
+            return null;
         } catch (RuntimeException e) {
             return null;
         }
