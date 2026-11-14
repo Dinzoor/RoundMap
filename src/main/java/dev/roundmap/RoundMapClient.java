@@ -57,7 +57,7 @@ public final class RoundMapClient implements ClientModInitializer {
     static int miniOpacity = 100;
     // Pixel-art grid in world blocks. Larger steps produce crisp, larger
     // squares on both the circular minimap and the fullscreen map.
-    static int mapPixelSize = 2;
+    static int mapPixelSize = 1;
     // Fullscreen terrain defaults to one sampled block per map cell,
     // independent of the intentionally pixelated HUD minimap.
     static int fullPixelSize = 1;
@@ -70,8 +70,10 @@ public final class RoundMapClient implements ClientModInitializer {
     private static int arrowColorIndex = 0;
     private static int worldMarkerDistance = 1500;
     static boolean brightFog = true;
-    private static int miniSize = 48, mapZoom = 3;
-    private static double miniZoom = 1.0;
+    private static int miniSize = 48, mapZoom = 5;
+    // Both maps default to five SCREEN pixels for one Minecraft block.
+    // miniZoom is pixels-per-world-block (independent of circle radius).
+    private static double miniZoom = 5.0;
     private static double miniX = -1, miniY = -1;
     private static final Path POSITION_FILE = FabricLoader.getInstance().getConfigDir().resolve("roundmap-position.properties");
 
@@ -83,12 +85,17 @@ public final class RoundMapClient implements ClientModInitializer {
             miniX = Double.parseDouble(p.getProperty("x", "-1"));
             miniY = Double.parseDouble(p.getProperty("y", "-1"));
             miniSize = Integer.parseInt(p.getProperty("size", "48"));
-            miniZoom = Double.parseDouble(p.getProperty("zoom", "1.0"));
-            if (!Double.isFinite(miniZoom)) miniZoom = 1.0;
-            miniZoom = Math.max(1.0, Math.min(4.0, miniZoom));
+            // Old alpha config stored a scale factor whose size depended on
+            // the minimap circle. Adopt exact pixels/block once per profile.
+            boolean oldZoomFormat = !"pixels_per_block".equals(
+                p.getProperty("miniZoomUnits", ""));
+            miniZoom = oldZoomFormat ? 5.0
+                : Double.parseDouble(p.getProperty("zoom", "5.0"));
+            if (!Double.isFinite(miniZoom)) miniZoom = 5.0;
+            miniZoom = Math.max(1.0, Math.min(10.0, miniZoom));
             miniSize = Math.max(24, Math.min(120, miniSize));
-            mapPixelSize = Math.max(1, Math.min(4,
-                Integer.parseInt(p.getProperty("pixelSize", "2"))));
+            mapPixelSize = oldZoomFormat ? 1 : Math.max(1, Math.min(4,
+                Integer.parseInt(p.getProperty("pixelSize", "1"))));
             fullPixelSize = Math.max(1, Math.min(4,
                 Integer.parseInt(p.getProperty("fullPixelSize", "1"))));
             showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
@@ -136,6 +143,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("pixelSize", Integer.toString(mapPixelSize));
         p.setProperty("fullPixelSize", Integer.toString(fullPixelSize));
         p.setProperty("zoom", Double.toString(miniZoom));
+        p.setProperty("miniZoomUnits", "pixels_per_block");
         p.setProperty("visible", Boolean.toString(showMini));
         p.setProperty("coords", Boolean.toString(showCoords));
         p.setProperty("biome", Boolean.toString(showBiome));
@@ -396,8 +404,13 @@ public final class RoundMapClient implements ClientModInitializer {
             else if (optionsKey.consumeClick()) client.setScreen(new OptionsScreen());
             else if (listKey.consumeClick()) client.setScreen(new WaypointListScreen(null, 0));
             else if (toggleKey.consumeClick()) { showMini = !showMini; savePosition(); }
-            else if (zoomInKey.consumeClick()) { miniZoom = Math.min(4.0, miniZoom + 0.5); savePosition(); }
-            else if (zoomOutKey.consumeClick()) { miniZoom = Math.max(1.0, miniZoom - 0.5); savePosition(); }
+            else if (zoomInKey.consumeClick()) {
+                miniZoom = Math.min(10.0, miniZoom + 0.5);
+                savePosition();
+            } else if (zoomOutKey.consumeClick()) {
+                miniZoom = Math.max(1.0, miniZoom - 0.5);
+                savePosition();
+            }
         });
         loadPosition();
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
@@ -549,7 +562,9 @@ public final class RoundMapClient implements ClientModInitializer {
             miniViewZ = z;
             return;
         }
-        double amount = 1.0 - Math.exp(-elapsed * 24.0);
+        // Approximately twice the smoothing time of alpha.13. Unlike a
+        // literal two-second delay, this keeps the map responsive.
+        double amount = 1.0 - Math.exp(-elapsed * 12.0);
         miniViewX += (x - miniViewX) * amount;
         miniViewZ += (z - miniViewZ) * amount;
     }
@@ -560,7 +575,7 @@ public final class RoundMapClient implements ClientModInitializer {
             miniViewX, miniViewZ);
         outline(g, cx, cy, miniSize);
         RoundMapRadar.draw(g, mc, cx, cy, miniViewX, miniViewZ,
-            (float)(miniSize * miniZoom / HALF), miniSize, miniSize, true);
+            (float)miniZoom, miniSize, miniSize, true);
         drawMiniWaypoints(g, mc, cx, cy);
         playerArrow(g, mc, cx, cy);
         if (showCompass) {
@@ -604,7 +619,7 @@ public final class RoundMapClient implements ClientModInitializer {
         }
         visible.sort(java.util.Comparator.comparingDouble(m ->
             Math.hypot(m.x() - mc.player.getX(), m.z() - mc.player.getZ())));
-        double scale = miniSize * miniZoom / (double)HALF;
+        double scale = miniZoom;
         int edge = Math.max(8, miniSize - 11);
         int maxLabels = Math.min(3, visible.size());
         int[] labelY = new int[maxLabels];
@@ -1046,8 +1061,11 @@ public final class RoundMapClient implements ClientModInitializer {
                     () -> { showCompass = !showCompass; savePosition(); });
                 option(left, top + 3 * step, cw, "Размер круга: " + miniSize,
                     () -> { miniSize = miniSize == 36 ? 48 : miniSize == 48 ? 60 : 36; savePosition(); });
-                option(right, top, cw, "Масштаб: " + (int)(miniZoom * 100) + "%",
-                    () -> { miniZoom = miniZoom >= 4.0 ? 1.0 : miniZoom + 0.5; savePosition(); });
+                option(right, top, cw, "1 блок: " + miniZoom + " пикс.",
+                    () -> {
+                        miniZoom = miniZoom >= 10.0 ? 1.0 : miniZoom + 1.0;
+                        savePosition();
+                    });
                 option(right, top + step, cw, "Непрозрачность: " + miniOpacity + "%",
                     () -> { miniOpacity = miniOpacity <= 25 ? 100 : miniOpacity - 25; RoundMapTextures.invalidate(); savePosition(); });
                 option(right, top + 3 * step, cw, "Биом: " + (showBiome ? "Вкл" : "Выкл"),
