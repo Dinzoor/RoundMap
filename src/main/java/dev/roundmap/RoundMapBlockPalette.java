@@ -35,7 +35,8 @@ final class RoundMapBlockPalette {
     private static final Identifier NO_SPRITE = Identifier.fromNamespaceAndPath("roundmap", "none");
     private static Object lastResources;
 
-    private record TextureSample(int average, int[] grid) {}
+    // 4x4 colors are prepared once per texture, never per rendered pixel.
+    private record TextureSample(int average, int[] grid, int[] micro) {}
 
     static void clear() {
         spriteForState.clear();
@@ -70,6 +71,42 @@ final class RoundMapBlockPalette {
         // Average ensures visually stable large-scale colors, while one of
         // 64 texture samples preserves local texture variation.
         return blend(sample.average(), pixel, 45);
+    }
+
+    /**
+     * Precompute four-by-four genuine texture samples for a block whose
+     * main color is already known. Fine scan writes these into an optional
+     * in-memory cache; the map render loop never touches world/model APIs.
+     * The cached average block color preserves biome tint, height shading
+     * and custom server-color fallbacks.
+     */
+    static void fillMicro(Minecraft mc, BlockState state, BlockPos pos,
+                          int blockColor, int[] destination, int offset) {
+        Identifier[] variants = spriteForState.computeIfAbsent(
+            state, ignored -> new Identifier[16]);
+        int variant = (int)(state.getSeed(pos) & 15);
+        Identifier id = variants[variant];
+        if (id == null) {
+            id = findSprite(mc, state, pos);
+            variants[variant] = id == null ? NO_SPRITE : id;
+        }
+        TextureSample sample = id == null || id.equals(NO_SPRITE) ?
+            null : sampleFor(mc, id);
+        if (sample == null || suspiciousMissingSample(sample)) {
+            java.util.Arrays.fill(destination, offset, offset + 16, blockColor);
+            return;
+        }
+        int avg = sample.average();
+        for (int i = 0; i < 16; i++) {
+            int sub = sample.micro()[i];
+            int red = Math.max(0, Math.min(255, ((blockColor >> 16) & 255) +
+                Math.max(-48, Math.min(48, (((sub >> 16) & 255) - ((avg >> 16) & 255)) * 3 / 4))));
+            int green = Math.max(0, Math.min(255, ((blockColor >> 8) & 255) +
+                Math.max(-48, Math.min(48, (((sub >> 8) & 255) - ((avg >> 8) & 255)) * 3 / 4))));
+            int blue = Math.max(0, Math.min(255, (blockColor & 255) +
+                Math.max(-48, Math.min(48, ((sub & 255) - (avg & 255)) * 3 / 4))));
+            destination[offset + i] = 0xFF000000 | red << 16 | green << 8 | blue;
+        }
     }
 
     // Not a general filter for red blocks! Only obviously defective,
@@ -216,7 +253,22 @@ final class RoundMapBlockPalette {
                 ((int)(g / n) << 8) | (int)(b / n);
             for (int i = 0; i < grid.length; i++)
                 if (grid[i] == 0) grid[i] = average;
-            return new TextureSample(average, grid);
+            int[] micro = new int[16];
+            for (int subZ = 0; subZ < 4; subZ++) {
+                for (int subX = 0; subX < 4; subX++) {
+                    int sr = 0, sg = 0, sb = 0;
+                    for (int dz = 0; dz < 2; dz++)
+                        for (int dx = 0; dx < 2; dx++) {
+                            int c = grid[(subZ * 2 + dz) * 8 + subX * 2 + dx];
+                            sr += (c >> 16) & 255;
+                            sg += (c >> 8) & 255;
+                            sb += c & 255;
+                        }
+                    micro[subZ * 4 + subX] = 0xFF000000 |
+                        (sr / 4) << 16 | (sg / 4) << 8 | (sb / 4);
+                }
+            }
+            return new TextureSample(average, grid, micro);
         } catch (IOException | RuntimeException e) {
             return null;
         }
