@@ -740,6 +740,11 @@ public final class RoundMapClient implements ClientModInitializer {
         }
     }
 
+    static boolean highDetailMapVisible() {
+        return !caveMode && Minecraft.getInstance().screen instanceof MapScreen map
+            && map.visualZoom >= 2.0;
+    }
+
     private static final class MapScreen extends Screen {
         private double panX, panZ, oldX, oldY;
         // The texture is rescaled continuously while a new zoom level is
