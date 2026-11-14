@@ -528,11 +528,38 @@ public final class RoundMapClient implements ClientModInitializer {
         }
     }
 
+    // The map camera follows the player's precise position, smoothly
+    // interpolated between game ticks. Reset after teleports/world changes.
+    private static double miniViewX = Double.NaN, miniViewZ = Double.NaN;
+    private static long miniFrameAt;
+    private static Object miniCameraWorld;
+    private static void updateMiniCamera(Minecraft mc) {
+        double x = mc.player.getX(), z = mc.player.getZ();
+        long now = System.nanoTime();
+        double elapsed = miniFrameAt == 0 ? .05 :
+            Math.min(.10, Math.max(.001, (now - miniFrameAt) / 1_000_000_000.0));
+        boolean reset = mc.level != miniCameraWorld ||
+            !Double.isFinite(miniViewX) ||
+            Math.hypot(x - miniViewX, z - miniViewZ) > 12.0 ||
+            (miniFrameAt != 0 && now - miniFrameAt > 500_000_000L);
+        miniCameraWorld = mc.level;
+        miniFrameAt = now;
+        if (reset) {
+            miniViewX = x;
+            miniViewZ = z;
+            return;
+        }
+        double amount = 1.0 - Math.exp(-elapsed * 24.0);
+        miniViewX += (x - miniViewX) * amount;
+        miniViewZ += (z - miniViewZ) * amount;
+    }
+
     private static void drawMini(GuiGraphics g, Minecraft mc, int cx, int cy) {
+        updateMiniCamera(mc);
         RoundMapTextures.minimap(g, cx, cy, miniSize, miniZoom,
-            mc.player.getBlockX(), mc.player.getBlockZ());
+            miniViewX, miniViewZ);
         outline(g, cx, cy, miniSize);
-        RoundMapRadar.draw(g, mc, cx, cy, mc.player.getBlockX(), mc.player.getBlockZ(),
+        RoundMapRadar.draw(g, mc, cx, cy, miniViewX, miniViewZ,
             (float)(miniSize * miniZoom / HALF), miniSize, miniSize, true);
         drawMiniWaypoints(g, mc, cx, cy);
         playerArrow(g, mc, cx, cy);
@@ -583,8 +610,8 @@ public final class RoundMapClient implements ClientModInitializer {
         int[] labelY = new int[maxLabels];
         for (int i = 0; i < visible.size(); i++) {
             Marker marker = visible.get(i);
-            double dx = (marker.x() + 0.5 - mc.player.getX()) * scale;
-            double dz = (marker.z() + 0.5 - mc.player.getZ()) * scale;
+            double dx = (marker.x() + 0.5 - miniViewX) * scale;
+            double dz = (marker.z() + 0.5 - miniViewZ) * scale;
             double length = Math.hypot(dx, dz);
             // Clamp distant waypoints to the minimap border; their world
             // coordinates do not change, only their HUD indicator moves.
