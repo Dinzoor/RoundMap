@@ -51,7 +51,7 @@ final class RoundMapRadar {
     }
 
     static void draw(GuiGraphics g, Minecraft mc, int centerX, int centerY,
-                     int worldX, int worldZ, float scale,
+                     double worldX, double worldZ, float scale,
                      int rx, int ry, boolean circular) {
         if ((circular && !onMini) || (!circular && !onFull)) return;
         update(mc);
