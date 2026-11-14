@@ -69,5 +69,11 @@ final class RoundMapWorldIdentity {
             .resolve(hashed(key) + ".txt");
     }
 
+    static Path cavePath(String key, int yBand) {
+        return FabricLoader.getInstance().getConfigDir()
+            .resolve("roundmap").resolve("caves").resolve("v1")
+            .resolve(hashed(key + "|layer:" + yBand) + ".dat.gz");
+    }
+
     private RoundMapWorldIdentity() {}
 }
