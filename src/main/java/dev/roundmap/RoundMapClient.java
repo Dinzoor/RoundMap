@@ -365,7 +365,7 @@ public final class RoundMapClient implements ClientModInitializer {
         double rightX = forwardZ, rightZ = -forwardX;
         int w = g.guiWidth(), h = g.guiHeight();
         for (Marker marker : markers) {
-            if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
+            if (!marker.visible() || !marker.dimension().equals(mc.level.dimension().toString())) continue;
             double dx = marker.x() + 0.5 - mc.player.getX();
             double dy = marker.y() + 0.5 - (mc.player.getY() + 1.62);
             double dz = marker.z() + 0.5 - mc.player.getZ();
@@ -384,7 +384,7 @@ public final class RoundMapClient implements ClientModInitializer {
             String label = marker.name() + " - " + (int)Math.round(distance) + " m";
             int tw = mc.font.width(label);
             g.fill(sx - tw / 2 - 5, sy - 16, sx + tw / 2 + 5, sy + 4, 0x990B111A);
-            g.fill(sx - 3, sy - 22, sx + 4, sy - 15, marker.color());
+            waypointPin(g, mc, sx, sy - 24, marker, false);
             g.drawCenteredString(mc.font, label, sx, sy - 12, 0xFFFFFFFF);
         }
     }
@@ -417,15 +417,15 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void drawMarkers(GuiGraphics g, Minecraft mc, int cx, int cy,
             float scale, int radius, boolean circle, double worldX, double worldZ) {
         for (Marker marker : markers) {
-            if (!marker.dimension().equals(mc.level.dimension().toString())) continue;
+            if (!marker.visible() || !marker.dimension().equals(mc.level.dimension().toString())) continue;
             int dx = (int)Math.round((marker.x() - worldX) * scale);
             int dz = (int)Math.round((marker.z() - worldZ) * scale);
             int limitX = circle ? radius - 4 : g.guiWidth() / 2 - 4;
             int limitY = circle ? radius - 4 : g.guiHeight() / 2 - 4;
             if (Math.abs(dx) >= limitX || Math.abs(dz) >= limitY) continue;
             if (circle && dx * dx + dz * dz >= (radius - 4) * (radius - 4)) continue;
-            g.fill(cx + dx - 2, cy + dz - 2, cx + dx + 3, cy + dz + 3, marker.color());
-            if (showLabels) g.drawCenteredString(mc.font, marker.name(), cx + dx, cy + dz - 14, -1);
+            waypointPin(g, mc, cx + dx, cy + dz, marker, circle);
+            if (showLabels) g.drawCenteredString(mc.font, marker.name(), cx + dx, cy + dz - (circle ? 15 : 19), -1);
         }
     }
 
