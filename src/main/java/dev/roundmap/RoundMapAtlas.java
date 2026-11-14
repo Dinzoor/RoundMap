@@ -234,8 +234,10 @@ final class RoundMapAtlas {
                         }
                         byte[] lights = new byte[256];
                         if (version == MAGIC) in.readFully(lights);
-                        if (version == PREVIEW_MAGIC)
-                            stage = stage == 1 ? 2 : stage == 2 ? 3 : stage;
+                        if (version == OLD_MAGIC && stage == 3)
+                            stage = 2; // Revisit old tiles to capture light levels.
+                        else if (version == PREVIEW_MAGIC)
+                            stage = stage == 1 ? 2 : stage == 2 ? 2 : stage;
                         else if (version == LEGACY_MAGIC)
                             stage = stage > 0 ? 2 : 0;
                         boolean invalid = false;
