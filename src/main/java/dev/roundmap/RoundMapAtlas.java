@@ -125,6 +125,16 @@ final class RoundMapAtlas {
         return r >= 175 && g <= 24 && b <= 24 && Math.abs(g - b) <= 10;
     }
 
+    // Alpha.16 saved this artificial gray (#81868D) to the atlas.
+    // The altitude brightness offset shifts all three channels equally,
+    // so check their exact spacing rather than natural grayscale colors.
+    private static boolean legacyGray(int color) {
+        int r = (color >>> 16) & 255;
+        int g = (color >>> 8) & 255;
+        int b = color & 255;
+        return r >= 103 && r <= 154 && g == r + 5 && b == g + 7;
+    }
+
     // Only a known old *gray sentinel* denotes missing terrain.
     // Alpha.15 mistakenly treated bright-red real/custom block colors as
     // absent, turning entire explored worlds into fog.
@@ -266,27 +276,25 @@ final class RoundMapAtlas {
                         else if (version == LEGACY_MAGIC)
                             stage = stage > 0 ? 2 : 0;
                         boolean invalid = false;
-                        int vividRed = 0;
+                        int legacyGrayPixels = 0, oldRedPixels = 0;
                         for (int p = 0; p < 256; p++) {
                             if (invalidFallback(colors[p])) {
                                 colors[p] = 0;
                                 if (heights != null) heights[p] = Short.MIN_VALUE;
                                 invalid = true;
-                            } else if (invalidRed(colors[p])) {
-                                vividRed++;
+                            } else {
+                                if (legacyGray(colors[p])) legacyGrayPixels++;
+                                if (invalidRed(colors[p])) oldRedPixels++;
                             }
                         }
-                        // Repair obviously corrupt, solid-red old atlas
-                        // chunks without erasing the explored terrain mask.
-                        // Sporadic real red blocks are left untouched.
-                        if (vividRed >= 192) {
-                            for (int p = 0; p < 256; p++)
-                                if (invalidRed(colors[p])) colors[p] = 0xFF81868D;
-                            stage = Math.min(stage, 2); // Resample if seen.
-                        }
-                        // Alpha.15 may already have written zeros to disk.
-                        // Those lost colors cannot be reconstructed from the
-                        // save alone: prioritize fresh client chunk scanning.
+                        // Alpha.16 overwrote the actual block texture with
+                        // flat gray. Keep the old explored data visible while
+                        // the player is away, but schedule a full 16x16
+                        // re-sample when the chunk returns to view.
+                        if (legacyGrayPixels >= 64 || oldRedPixels >= 192)
+                            stage = Math.min(stage, 2);
+                        // Alpha.15 may have saved zeros in a fully explored
+                        // tile. Re-scan those rather than losing the chunk.
                         if (invalid) stage = 0;
                         loaded.put(k, new Tile(stage, colors, heights, lights));
                     }
@@ -407,16 +415,46 @@ final class RoundMapAtlas {
                 ? mapColor.col | 0xFF000000
                 : RoundMapBlockPalette.color(mc, state, ground,
                     mapColor == MapColor.NONE ? 0 : mapColor.col | 0xFF000000);
-            // Some custom server block models expose a placeholder red
-            // pixel. Never discard the chunk (alpha.15 did, creating fog).
-            // Prefer the block's material MapColor when usable; otherwise
-            // keep a neutral fallback and allow the scan to finish.
+            // Never paint an entire custom server floor uniform gray.
+            // Some server packs use a broken bright-red top-face sprite.
+            // First try other model faces (handled in BlockPalette). If
+            // they are also unavailable, use an actual lower block texture.
             if (invalidRed(color)) {
-                if (mapColor != MapColor.NONE && !invalidRed(mapColor.col)) {
-                    color = mapColor.col | 0xFF000000;
-                } else {
-                    color = 0xFF81868D; // Unknown server material, not fog.
+                int replacement = 0;
+                for (int depth = 1; depth <= 7; depth++) {
+                    BlockPos lower = ground.below(depth);
+                    if (lower.getY() < mc.level.getMinY()) break;
+                    BlockState below = mc.level.getBlockState(lower);
+                    if (below.isAir()) continue;
+                    MapColor belowMap = below.getMapColor(mc.level, lower);
+                    int belowColor = RoundMapBlockPalette.color(mc, below, lower,
+                        belowMap == MapColor.NONE ? 0 :
+                        (belowMap.col | 0xFF000000));
+                    if (belowColor != 0 && !invalidRed(belowColor)) {
+                        replacement = belowColor;
+                        break;
+                    }
                 }
+                if (replacement == 0 && mapColor != MapColor.NONE &&
+                    !invalidRed(mapColor.col))
+                    replacement = mapColor.col | 0xFF000000;
+                // A biome-derived color is a last-resort approximation,
+                // not a fake stored "mapped block". It is deliberately
+                // nonuniform so missing textures cannot produce a flat sea.
+                if (replacement == 0) {
+                    String biomeName = mc.level.getBiome(ground).unwrapKey()
+                        .map(k -> k.identifier().getPath()).orElse("");
+                    int noise = (x * 73428767 ^ z * 912931) >>> 29;
+                    int base = biomeName.contains("desert") ||
+                        biomeName.contains("badlands") ? 0xFFAF956A :
+                        biomeName.contains("snow") || biomeName.contains("frozen")
+                            ? 0xFFB8C6CD : 0xFF627B65;
+                    replacement = 0xFF000000 |
+                        (Math.min(255, ((base >>> 16) & 255) + noise * 2) << 16) |
+                        (Math.min(255, ((base >>> 8) & 255) + noise * 2) << 8) |
+                        Math.min(255, (base & 255) + noise * 2);
+                }
+                color = replacement;
             }
             // A lightweight biome-aware material palette. Capture only on the
             // client tick; no live biome queries happen while drawing the map.
