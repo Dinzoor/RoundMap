@@ -1,4 +1,4 @@
-# RoundMap — Fabric Minecraft 1.21.11 (0.2.0-alpha.22)
+# RoundMap — Fabric Minecraft 1.21.11 (0.2.0-alpha.23)
 
 RoundMap is an experimental client-side world map for Minecraft Java 1.21.11 and Fabric. Source, interface and map graphics are original to RoundMap; Diorama was reviewed as a feature reference.
 
@@ -8,6 +8,7 @@ RoundMap is an experimental client-side world map for Minecraft Java 1.21.11 and
 - Fullscreen map: `M` by default, smooth left-button drag, wheel zoom, recenter button, surface/cave map tabs, cursor coordinates and distance.
 - Surface map: incremental scanning of already loaded chunks, world/dimension-specific persistent explorer atlas and soft fog of war. Terrain model texture sampling includes active server resource packs when compatible.
 - Caves (alpha): a **separate** cached and persisted 2D map of cave floors near the player's vertical 16-block layer. Does not reveal unseen/unloaded chunks. Cave mode currently has less detail than Diorama.
+- Maze wall contrast (alpha.23): fullscreen surface maps outline the boundaries where an explored floor is at least two blocks below an adjacent wall/ledge. This makes corridor dead ends easier to recognize without revealing unexplored areas. Toggle **Настройки → Оверлеи → Границы стен**; the small HUD minimap is unchanged.
 - Nighttime lighting: block-light values captured with the terrain. Choose world time, forced day or night in **Вид** settings, and enable/disable night shading.
 - Map library (**Карты**): save named camera views (center and zoom), reopen them, or remove a view. Views share the explored terrain for the same world/dimension and do **not** duplicate the world save.
 - Optional entity radar: players, hostile/passive/neutral mobs and dropped items. Only client-observable entities are used.
