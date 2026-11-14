@@ -84,34 +84,76 @@ final class RoundMapTextures {
         }
     }
 
+    // Keep a fractional camera anchor for the HUD map. The old code used
+    // integer block coordinates and refreshed once every 240 ms, causing
+    // visible jumps whenever the player walked across block boundaries.
+    private static double sampledMiniX = Double.NaN, sampledMiniZ = Double.NaN;
+    private static int miniPixelKey = -1, miniOpacityKey = -1;
+
     static void minimap(GuiGraphics g, int cx, int cy, int radius,
-                        double zoom, int playerX, int playerZ) {
-        // A near 1:1 HUD texture avoids shrinking 160 texels into 96
-        // screen pixels; nearest-style block cells remain visibly crisp.
-        int pixels = 96;
+                        double zoom, double cameraX, double cameraZ) {
+        final int pixels = 96;
         MINI.allocate(pixels, pixels);
-        int zoomKey = (int)Math.round(zoom * 1000);
-        if (MINI.needsRefresh(playerX, playerZ, zoomKey, 240_000_000L)) {
-            double scale = 48.0 / (radius > 0 ? zoom : 1.0);
+        final int zoomKey = (int)Math.round(zoom * 1000);
+        final int revision = RoundMapAtlas.revision();
+        final int pixelSize = RoundMapClient.mapPixelSize;
+        final int opacity = RoundMapClient.miniOpacity;
+        final long now = System.nanoTime();
+        final long elapsed = now - MINI.updatedAt;
+        boolean settingsChanged = zoomKey != MINI.zoomKey ||
+            miniPixelKey != pixelSize || miniOpacityKey != opacity;
+        boolean cameraChanged = !Double.isFinite(sampledMiniX) ||
+            Math.hypot(cameraX - sampledMiniX, cameraZ - sampledMiniZ) > .04;
+        boolean terrainChanged = MINI.revision != revision;
+        // Cap GPU uploads to ~30 Hz even on high-FPS clients. This is far
+        // smoother than 240 ms without re-rendering 96x96 every game frame.
+        boolean refresh = MINI.updatedAt == 0 || settingsChanged ||
+            (elapsed >= 33_000_000L && cameraChanged) ||
+            (elapsed >= 110_000_000L && terrainChanged);
+        if (refresh) {
+            double range = 48.0 / Math.max(.05, zoom);
+            int step = Math.max(1, pixelSize);
+            int alpha = Math.max(0, Math.min(255, opacity * 255 / 100));
+            int previousWz = Integer.MIN_VALUE;
+            int[] previousRow = new int[pixels];
             for (int py = 0; py < pixels; py++) {
-                double y = (py + .5 - pixels / 2.0) / (pixels / 2.0);
+                double fy = (py + .5 - pixels / 2.0) / (pixels / 2.0);
+                int wz = (int)Math.floor(cameraZ + fy * range);
+                wz = Math.floorDiv(wz, step) * step;
+                boolean useCachedRow = wz == previousWz;
+                previousWz = wz;
+                int previousWx = Integer.MIN_VALUE;
+                int terrain = 0;
                 for (int px = 0; px < pixels; px++) {
-                    double x = (px + .5 - pixels / 2.0) / (pixels / 2.0);
-                    if (x * x + y * y > 1.0) {
-                        MINI.pixels.setPixel(px, py, 0);
+                    double fx = (px + .5 - pixels / 2.0) / (pixels / 2.0);
+                    int color;
+                    if (useCachedRow) {
+                        color = previousRow[px];
                     } else {
-                        int wx = playerX + (int)Math.floor(x * scale);
-                        int wz = playerZ + (int)Math.floor(y * scale);
-                        int step = RoundMapClient.mapPixelSize;
+                        int wx = (int)Math.floor(cameraX + fx * range);
                         wx = Math.floorDiv(wx, step) * step;
-                        wz = Math.floorDiv(wz, step) * step;
-                        int color = RoundMapFog.color(wx, wz);
-                        int alpha = Math.max(0, Math.min(255, RoundMapClient.miniOpacity * 255 / 100));
-                        MINI.pixels.setPixel(px, py, (color & 0x00FFFFFF) | (alpha << 24));
+                        if (wx != previousWx) {
+                            terrain = RoundMapFog.color(wx, wz);
+                            previousWx = wx;
+                        }
+                        color = terrain;
+                        previousRow[px] = color;
                     }
+                    if (fx * fx + fy * fy > 1.0)
+                        MINI.pixels.setPixel(px, py, 0);
+                    else
+                        MINI.pixels.setPixel(px, py,
+                            (color & 0x00FFFFFF) | (alpha << 24));
                 }
             }
             MINI.texture.upload();
+            sampledMiniX = cameraX;
+            sampledMiniZ = cameraZ;
+            MINI.zoomKey = zoomKey;
+            miniPixelKey = pixelSize;
+            miniOpacityKey = opacity;
+            MINI.revision = revision;
+            MINI.updatedAt = now;
         }
         g.blit(RenderPipelines.GUI_TEXTURED, MINI.id,
             cx - radius, cy - radius, 0f, 0f,
