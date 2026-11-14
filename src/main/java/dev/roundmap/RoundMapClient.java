@@ -809,51 +809,221 @@ public final class RoundMapClient implements ClientModInitializer {
         }
     }
 
+    private static final class WaypointDraft {
+        int x, y, z, color, icon;
+        String name, initials, folder, dimension;
+        boolean visible = true, temporary;
+        Marker existing;
+        WaypointDraft(int x, int y, int z, String dimension) {
+            this.x = x; this.y = y; this.z = z; this.dimension = dimension;
+            this.name = "Точка " + (markers.size() + 1);
+            this.color = MARKER_COLORS[0]; this.initials = "";
+            this.folder = "Основная"; this.icon = 0;
+        }
+        WaypointDraft(Marker marker) {
+            this(marker.x(), marker.y(), marker.z(), marker.dimension());
+            name = marker.name(); color = marker.color(); icon = marker.icon();
+            initials = marker.initials(); folder = marker.folder();
+            visible = marker.visible(); temporary = marker.temporary();
+            existing = marker;
+        }
+    }
+
     private static final class NameScreen extends Screen {
-        private EditBox name, altitude;
-        private final int x, z;
-        private final String dimension;
+        private final WaypointDraft draft;
         private final Screen parent;
-        private int colorIndex = 0;
-        private NameScreen(int x, int z, String dimension) { this(x, z, dimension, null); }
+        private EditBox nameInput, initialsInput, xInput, yInput, zInput;
+        private String error = "";
+
+        private NameScreen(int x, int z, String dimension) {
+            this(x, z, dimension, null);
+        }
         private NameScreen(int x, int z, String dimension, Screen parent) {
-            super(Component.literal("Новая точка"));
-            this.x = x; this.z = z; this.dimension = dimension;
+            this(new WaypointDraft(x,
+                Minecraft.getInstance().player == null ? 64 :
+                    Minecraft.getInstance().player.getBlockY(),
+                z, dimension), parent);
+            int elevation = RoundMapAtlas.heightAt(x, z);
+            if (elevation != Short.MIN_VALUE) draft.y = elevation;
+        }
+        private NameScreen(Marker marker, Screen parent) {
+            this(new WaypointDraft(marker), parent);
+        }
+        private NameScreen(WaypointDraft draft, Screen parent) {
+            super(Component.literal("Редактор точки"));
+            this.draft = draft;
             this.parent = parent;
         }
+        private int left() { return width / 2 - 168; }
+        private int top() { return Math.max(19, height / 2 - 148); }
+        private EditBox field(int x, int y, int w, String label, String value, int length) {
+            EditBox input = new EditBox(font, x, y, w, 20, Component.literal(label));
+            input.setMaxLength(length);
+            input.setValue(value);
+            addRenderableWidget(input);
+            return input;
+        }
+        private void capture() {
+            if (nameInput == null) return;
+            draft.name = nameInput.getValue();
+            draft.initials = initialsInput.getValue();
+            try { draft.x = Integer.parseInt(xInput.getValue().trim()); } catch (NumberFormatException ignored) { }
+            try { draft.y = Integer.parseInt(yInput.getValue().trim()); } catch (NumberFormatException ignored) { }
+            try { draft.z = Integer.parseInt(zInput.getValue().trim()); } catch (NumberFormatException ignored) { }
+        }
+        private void save() {
+            if (nameInput.getValue().trim().isEmpty()) {
+                error = "Укажи название точки";
+                return;
+            }
+            try {
+                draft.x = Integer.parseInt(xInput.getValue().trim());
+                draft.y = Integer.parseInt(yInput.getValue().trim());
+                draft.z = Integer.parseInt(zInput.getValue().trim());
+            } catch (NumberFormatException e) {
+                error = "Координаты должны быть целыми числами";
+                return;
+            }
+            draft.name = nameInput.getValue().trim();
+            draft.initials = initialsInput.getValue().trim();
+            if (!folders.contains(draft.folder)) folders.add(draft.folder);
+            Marker marker = new Marker(draft.x, draft.y, draft.z, draft.dimension,
+                draft.name, draft.color, draft.icon, draft.initials,
+                draft.folder, draft.visible, draft.temporary);
+            int index = markers.indexOf(draft.existing);
+            if (draft.existing != null && index >= 0) markers.set(index, marker);
+            else markers.add(marker);
+            saveMarkers();
+            minecraft.setScreen(parent);
+        }
         @Override protected void init() {
-            int left = width / 2 - 120, top = height / 2 - 57;
-            name = new EditBox(font, left, top, 240, 20, Component.literal("Название"));
-            name.setMaxLength(40);
-            name.setValue("Точка " + (markers.size() + 1));
-            addRenderableWidget(name);
-            setInitialFocus(name);
-            altitude = new EditBox(font, left, top + 26, 110, 20, Component.literal("Высота Y"));
-            altitude.setMaxLength(6);
-            altitude.setValue(Integer.toString(minecraft.player == null ? 64 : minecraft.player.getBlockY()));
-            addRenderableWidget(altitude);
-            addRenderableWidget(Button.builder(Component.literal("Цвет точки"), b -> {
-                colorIndex = (colorIndex + 1) % MARKER_COLORS.length;
-            }).bounds(left + 120, top + 26, 120, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Сохранить точку"), b -> {
-                String label = name.getValue().trim();
-                if (!label.isEmpty()) {
-                    int y = minecraft.player == null ? 64 : minecraft.player.getBlockY();
-                    try { y = Integer.parseInt(altitude.getValue().trim()); }
-                    catch (NumberFormatException ignored) { }
-                    markers.add(new Marker(x, y, z, dimension, label, MARKER_COLORS[colorIndex]));
-                    saveMarkers();
-                }
-                minecraft.setScreen(parent);
-            }).bounds(left, top + 54, 240, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Отмена"), b ->
-                minecraft.setScreen(parent)).bounds(left, top + 80, 240, 20).build());
+            int x = left(), y = top();
+            nameInput = field(x, y + 17, 235, "Название точки", draft.name, 48);
+            initialsInput = field(x + 244, y + 17, 92,
+                "Инициалы", draft.initials, 2);
+            xInput = field(x, y + 61, 106, "X", Integer.toString(draft.x), 12);
+            yInput = field(x + 115, y + 61, 106, "Y", Integer.toString(draft.y), 12);
+            zInput = field(x + 230, y + 61, 106, "Z", Integer.toString(draft.z), 12);
+            addRenderableWidget(Button.builder(Component.literal(
+                "Иконка: " + MARKER_ICONS[draft.icon]), b -> {
+                capture();
+                minecraft.setScreen(new IconPickerScreen(draft, parent));
+            }).bounds(x, y + 89, 106, 20).build());
+            addRenderableWidget(Button.builder(Component.literal(
+                "Папка: " + draft.folder), b -> {
+                capture();
+                int index = folders.indexOf(draft.folder);
+                draft.folder = folders.get((index + 1) % folders.size());
+                minecraft.setScreen(new NameScreen(draft, parent));
+            }).bounds(x + 115, y + 89, 166, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+                capture();
+                minecraft.setScreen(new FolderEditorScreen(draft, parent));
+            }).bounds(x + 291, y + 89, 45, 20).build());
+            for (int i = 0; i < MARKER_COLORS.length; i++) {
+                int slot = i, bx = x + (i % 8) * 42, by = y + 132 + (i / 8) * 28;
+                addRenderableWidget(Button.builder(Component.literal(" "), b -> {
+                    capture(); draft.color = MARKER_COLORS[slot];
+                }).bounds(bx, by, 36, 23).build());
+            }
+            addRenderableWidget(Button.builder(Component.literal(
+                "На карте и в мире: " + (draft.visible ? "Да" : "Нет")), b -> {
+                capture(); draft.visible = !draft.visible;
+                minecraft.setScreen(new NameScreen(draft, parent));
+            }).bounds(x, y + 194, 225, 20).build());
+            addRenderableWidget(Button.builder(Component.literal(
+                draft.temporary ? "Временная" : "Постоянная"), b -> {
+                capture(); draft.temporary = !draft.temporary;
+                minecraft.setScreen(new NameScreen(draft, parent));
+            }).bounds(x + 233, y + 194, 103, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Сохранить"),
+                b -> save()).bounds(x, y + 226, 163, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Отмена"),
+                b -> minecraft.setScreen(parent)).bounds(x + 174, y + 226, 162, 20).build());
+            setInitialFocus(nameInput);
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xBD15202B);
             super.render(g, mouseX, mouseY, delta);
-            int left = width / 2 - 120, top = height / 2 - 57;
-            g.fill(left + 224, top + 29, left + 237, top + 43, MARKER_COLORS[colorIndex]);
-            g.drawCenteredString(font, "X " + x + " Z " + z, width / 2, top - 16, 0xFFFFFFFF);
+            int x = left(), y = top();
+            g.drawString(font, draft.existing == null ? "Новая точка" : "Изменить точку",
+                x, y - 13, 0xFFFFFFFF);
+            g.drawString(font, "Название", x, y + 5, 0xFFDDDDDD);
+            g.drawString(font, "Инициалы", x + 244, y + 5, 0xFFDDDDDD);
+            g.drawString(font, "Координаты X, Y, Z", x, y + 49, 0xFFDDDDDD);
+            g.drawString(font, "Цвет точки", x, y + 118, 0xFFDDDDDD);
+            for (int i = 0; i < MARKER_COLORS.length; i++) {
+                int bx = x + (i % 8) * 42, by = y + 132 + (i / 8) * 28;
+                g.fill(bx + 7, by + 4, bx + 29, by + 19, MARKER_COLORS[i]);
+                if (draft.color == MARKER_COLORS[i]) {
+                    g.fill(bx + 2, by + 1, bx + 33, by + 2, 0xFFFFFFFF);
+                }
+            }
+            Marker example = new Marker(draft.x, draft.y, draft.z, draft.dimension,
+                draft.name, draft.color, draft.icon, draft.initials, draft.folder,
+                draft.visible, draft.temporary);
+            waypointPin(g, minecraft, x + 326, y - 10, example, false);
+            if (!error.isEmpty())
+                g.drawCenteredString(font, error, width / 2, y + 251, 0xFFFF7777);
+        }
+    }
+
+    private static final class IconPickerScreen extends Screen {
+        private final WaypointDraft draft;
+        private final Screen parent;
+        private IconPickerScreen(WaypointDraft draft, Screen parent) {
+            super(Component.literal("Выбери иконку"));
+            this.draft = draft; this.parent = parent;
+        }
+        @Override protected void init() {
+            int w = 48, startX = width / 2 - 149, y = height / 2 - 55;
+            for (int i = 0; i < MARKER_ICONS.length; i++) {
+                int iconIndex = i;
+                addRenderableWidget(Button.builder(Component.literal(MARKER_ICONS[i]), b -> {
+                    draft.icon = iconIndex;
+                    minecraft.setScreen(new NameScreen(draft, parent));
+                }).bounds(startX + (i % 6) * 50,
+                    y + (i / 6) * 42, w, 34).build());
+            }
+            addRenderableWidget(Button.builder(Component.literal("Назад"), b ->
+                minecraft.setScreen(new NameScreen(draft, parent)))
+                .bounds(width / 2 - 90, y + 96, 180, 20).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xCD152029);
+            super.render(g, mouseX, mouseY, delta);
+            g.drawCenteredString(font, "Иконки RoundMap: W, дом, кровать, портал, отметки...",
+                width / 2, height / 2 - 78, 0xFFFFFFFF);
+        }
+    }
+
+    private static final class FolderEditorScreen extends Screen {
+        private final WaypointDraft draft;
+        private final Screen parent;
+        private EditBox input;
+        private FolderEditorScreen(WaypointDraft draft, Screen parent) {
+            super(Component.literal("Новая папка"));
+            this.draft = draft; this.parent = parent;
+        }
+        @Override protected void init() {
+            int x = width / 2 - 120, y = height / 2 - 25;
+            input = new EditBox(font, x, y, 240, 20, Component.literal("Название папки"));
+            input.setMaxLength(36); addRenderableWidget(input); setInitialFocus(input);
+            addRenderableWidget(Button.builder(Component.literal("Создать"), b -> {
+                String name = input.getValue().trim();
+                if (!name.isEmpty() && !folders.contains(name)) folders.add(name);
+                if (!name.isEmpty()) draft.folder = name;
+                saveMarkers();
+                minecraft.setScreen(new NameScreen(draft, parent));
+            }).bounds(x, y + 28, 115, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Отмена"), b ->
+                minecraft.setScreen(new NameScreen(draft, parent)))
+                .bounds(x + 125, y + 28, 115, 20).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xD0152029);
+            super.render(g, mouseX, mouseY, delta);
+            g.drawCenteredString(font, "Новая папка точек", width / 2, height / 2 - 46, -1);
         }
     }
 }
