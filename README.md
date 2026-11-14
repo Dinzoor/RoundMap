@@ -1,35 +1,45 @@
-# RoundMap — Fabric 1.21.11 (0.2.0 alpha.7)
+# RoundMap — Fabric Minecraft 1.21.11 (0.2.0-alpha.9)
 
-Experimental client-side world map, built for Minecraft Java 1.21.11 and Fabric API.
+RoundMap is an experimental client-side world map for Minecraft Java 1.21.11 and Fabric. Source, interface and map graphics are original to RoundMap; Diorama was reviewed as a feature reference.
 
-## Map features
-- Round HUD minimap with drag-to-position editor, terrain zoom, size and opacity.
-- Large fullscreen map (M by default), mouse drag, wheel zoom, recenter, right-click waypoint creation.
-- Persistent explored surface atlas and fog of war per world/server/dimension.
-- Map renders from GPU textures instead of per-pixel GUI rectangles.
-- Surface is captured incrementally on the client tick, never scanned during GUI rendering.
-- Fine details are progressively refined across all visited chunks, rather than just 4 chunks around the player. Fullscreen texture resolution is up to 1024px.
-- Uses block model top-face sprites from active resource packs (including downloaded server resource packs) to approximate custom block colors. Detects resource-pack reloads and incrementally resamples visited chunks.
-- Waypoints visible on both maps and as directional labels in the game world.
-- Waypoint list with coordinates and deletion.
-- Optional player, hostile, passive, neutral and dropped-item radar.
-- Five tabs: Мини-карта, Радар, Оверлеи, Точки, Вид. UI supports Russian.
-- Keys can be rebound in Minecraft's standard Controls menu.
+## Map and minimap
 
-## Setup
-Use Java 21, Fabric Loader and Fabric API for Minecraft 1.21.11.
-Build with `gradle build`; install the JAR from `build/libs/` without `-sources`.
-GitHub Actions also builds the JAR; see **Actions → Build Fabric JAR → Artifacts**.
+- Circular, movable HUD minimap: freely position it with the mouse in the editor. Adjust size, terrain zoom, opacity, compass, coordinates and biome.
+- Fullscreen map: `M` by default, smooth left-button drag, wheel zoom, recenter button, surface/cave map tabs, cursor coordinates and distance.
+- Surface map: incremental scanning of already loaded chunks, world/dimension-specific persistent explorer atlas and soft fog of war. Terrain model texture sampling includes active server resource packs when compatible.
+- Caves (alpha): a **separate** cached and persisted 2D map of cave floors near the player's vertical 16-block layer. Does not reveal unseen/unloaded chunks. Cave mode currently has less detail than Diorama.
+- Nighttime lighting: block-light values captured with the terrain. Choose world time, forced day or night in **Вид** settings, and enable/disable night shading.
+- Map library (**Карты**): save named camera views (center and zoom), reopen them, or remove a view. Views share the explored terrain for the same world/dimension and do **not** duplicate the world save.
+- Optional entity radar: players, hostile/passive/neutral mobs and dropped items. Only client-observable entities are used.
 
-## Data and performance
-- Position, UI toggles, zoom and radar settings: `config/roundmap-position.properties`
-- Named waypoints: `config/roundmap/waypoints/v2/<sha256>.txt` (separate per save/server/dimension)
-- Explored atlas: `config/roundmap/explored/v3/<sha256>.dat.gz` (separate per save/server/dimension).
-- Older terrain caches remain on disk but v3 is used to avoid legacy dark placeholder tiles. Waypoints remain in `v2` and are not reset.
-- Lower **Вид → Сканирование** to 2 or 4 blocks/tick for lower overhead.
-- Switch **Вид → Качество** to **Быстро** for coarse but faster exploration.
+## Waypoints and folders
 
-## Limitations
-Work in progress. Terrain uses sampled block colors and active resource-pack model textures, not a full block geometry renderer. Cave layers, polished 3D waypoint projections, complete Diorama-grade volumetric terrain, and exhaustive radar options are **not yet implemented**. Server-side decorations constructed from display entities or plugins without client-side block models cannot be mapped accurately from a resource pack alone. Fullscreen rendering and storage have been rewritten but still require in-game testing for visual correctness and performance. Radar only uses nearby entities already sent to the client; it does not discover unseen entities.
+- Right-click on the fullscreen map opens a context menu: create a named waypoint, add a temporary waypoint, copy XYZ coordinates or copy a shareable position.
+- Waypoint editor supports name, X/Y/Z, initials, 12 original pixel-art icon styles, 16 colors, folders, display toggle and temporary/permanent status.
+- Waypoint list supports search, folder filtering, creating folders, editing existing entries, toggling visibility and deleting.
+- Permanent waypoints save in isolated world/dimension files; older waypoint formats still load.
+- Waypoint pins are drawn on the minimap, full map and world overlay. Nearby beds found in already-loaded chunks can be added automatically as red bed markers (not necessarily the player's respawn bed).
+- Settings under Minecraft's Options menu. Rebind keys in Minecraft's Controls menu.
 
-RoundMap is an independent fan project, not affiliated with Diorama.
+## Configuration and files
+
+- Minecraft 1.21.11, Java 21, Fabric Loader, matching Fabric API.
+- Install exactly one RoundMap JAR in `.minecraft/mods`.
+- Mod settings: `config/roundmap-position.properties`.
+- Waypoints/folders: `config/roundmap/waypoints/v2/<hash>.txt`.
+- Explored surface: `config/roundmap/explored/v3/<hash>.dat.gz` (RMA5 format).
+- Cave maps: `config/roundmap/caves/v1/<hash>.dat.gz`.
+- Saved map views: `config/roundmap/map_views/v1/<hash>.txt`.
+- All map and waypoint data are separated by world/connection and dimension. Cave data additionally uses a separate vertical layer.
+
+## Performance
+
+Surface scan has three levels: rapid per-chunk overview, medium 4×4 preview and final 16×16 block sampling. Block reads are capped by both an adjustable sample count and a short main-thread work budget. Fullscreen textures use 320px preview followed by a cached 1024px detailed texture. Disk compression runs off the render thread.
+
+Use **Вид → Сканирование** to tune the budget (32, 64, 128 or 256 samples/tick). Map quality can be toggled between detailed and faster. Shader/Iris/Sodium compatibility and FPS must be tested in game.
+
+## Important limitations
+
+This is an alpha and is **not** a graphical clone of Diorama: volumetric block baking, identical night shaders, full 3D cave geometry, display-entity based server decorations, true 3D waypoint beams, independent map datasets and all Diorama controls are not yet implemented. Server-side custom blocks are detectable only where their client block states and resource-pack models are available; decorations based solely on display entities are not automatically mapped.
+
+RoundMap is an independent project, not affiliated with Diorama.
