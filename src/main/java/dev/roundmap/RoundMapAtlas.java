@@ -99,6 +99,11 @@ final class RoundMapAtlas {
         for (Tile tile : tiles.values()) if (tile.stage > 0) explored++;
         return explored;
     }
+    static int detailedChunks() {
+        int count = 0;
+        for (Tile tile : tiles.values()) if (tile.stage >= 3) count++;
+        return count;
+    }
 
     // Old alpha builds wrote this particular gray whenever the sampled
     // surface was missing. It is not real terrain and should be fog.
