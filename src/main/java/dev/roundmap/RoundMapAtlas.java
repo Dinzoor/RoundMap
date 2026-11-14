@@ -100,6 +100,41 @@ final class RoundMapAtlas {
         dirty = true;
         RoundMapTextures.invalidate();
     }
+    /**
+     * Rebuild a small user-requested region from the live client chunks,
+     * keeping old pixel colors until each newly sampled tile is ready.
+     * Waypoints, other world maps and disk caches remain untouched.
+     */
+    static void rescanRegion(int x, int z, int radiusChunks) {
+        int cx = x >> 4, cz = z >> 4;
+        int n = Math.max(1, Math.min(8, radiusChunks));
+        for (int dz = -n; dz <= n; dz++) for (int dx = -n; dx <= n; dx++) {
+            Tile tile = tiles.get(key(cx + dx, cz + dz));
+            if (tile != null && tile.stage > 0)
+                tile.stage = Math.min(tile.stage, 2);
+        }
+        active = Long.MIN_VALUE;
+        forceRefresh();
+        revision++;
+        dirty = true;
+    }
+
+    static String diagnostics(Minecraft mc, int x, int z) {
+        if (mc.level == null) return "RoundMap: no world";
+        BlockPos p = new BlockPos(x, 0, z);
+        if (!mc.level.hasChunkAt(p))
+            return "RoundMap X=" + x + " Z=" + z + ": chunk not loaded";
+        BlockPos surface = mc.level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, p).below();
+        BlockState state = mc.level.getBlockState(surface);
+        Tile tile = tiles.get(key(x >> 4, z >> 4));
+        int stage = tile == null ? 0 : tile.stage;
+        int stored = colorAt(x, z);
+        return "RoundMap X=" + x + " Y=" + surface.getY() + " Z=" + z +
+            " stage=" + stage + " cache=#" +
+            String.format("%06X", stored & 0xFFFFFF) + " " +
+            RoundMapBlockPalette.diagnose(mc, state, surface);
+    }
+
     static int revision() { return revision; }
     static int exploredChunks() {
         int explored = 0;
