@@ -80,5 +80,32 @@ final class RoundMapFog {
         return lerp(terrain, fog, cover);
     }
 
+    /**
+     * Close-up LOD: four-by-four texture details inside each saved block.
+     * Fog/contours still use the existing atlas mask, so undiscovered land
+     * never becomes visible just because a higher-resolution texture exists.
+     */
+    static int detailedColor(int x, int z, int subX, int subZ) {
+        int sub = RoundMapAtlas.microColorAt(x, z, subX, subZ);
+        if (sub == 0) return color(x, z);
+        int base = RoundMapAtlas.colorAt(x, z);
+        if (base == 0) return color(x, z);
+        if (softEdges && (
+            RoundMapAtlas.colorAt(x - 7, z) == 0 ||
+            RoundMapAtlas.colorAt(x + 7, z) == 0 ||
+            RoundMapAtlas.colorAt(x, z - 7) == 0 ||
+            RoundMapAtlas.colorAt(x, z + 7) == 0))
+            return color(x, z);
+        int shaded = RoundMapAtlas.shadedColorAt(x, z);
+        if (shaded == 0) return color(x, z);
+        int red = Math.max(0, Math.min(255,
+            ((shaded >> 16) & 255) + ((sub >> 16) & 255) - ((base >> 16) & 255)));
+        int green = Math.max(0, Math.min(255,
+            ((shaded >> 8) & 255) + ((sub >> 8) & 255) - ((base >> 8) & 255)));
+        int blue = Math.max(0, Math.min(255,
+            (shaded & 255) + (sub & 255) - (base & 255)));
+        return 0xFF000000 | red << 16 | green << 8 | blue;
+    }
+
     private RoundMapFog() {}
 }
