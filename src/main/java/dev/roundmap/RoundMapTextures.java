@@ -29,11 +29,12 @@ final class RoundMapTextures {
     private static FullBuild previewBuild;
 
     private static final class FullBuild {
-        final int centerX, centerZ, zoom, revision, drawW, texW, texH;
+        final int centerX, centerZ, revision, drawW, texW, texH;
+        final double zoom;
         int nextRow;
         int previousWorldZ = Integer.MIN_VALUE;
         final int[] lastRow;
-        FullBuild(int centerX, int centerZ, int zoom, int revision,
+        FullBuild(int centerX, int centerZ, double zoom, int revision,
                   int drawW, int texW, int texH) {
             this.centerX = centerX;
             this.centerZ = centerZ;
@@ -118,7 +119,9 @@ final class RoundMapTextures {
     }
 
     private static int colorForFullMap(int worldX, int worldZ) {
-        int step = RoundMapClient.mapPixelSize;
+        // The surface map samples the exact stored block at high detail;
+        // pixelated HUD minimap keeps its own independent grid size.
+        int step = RoundMapClient.fullPixelSize;
         int wx = Math.floorDiv(worldX, step) * step;
         int wz = Math.floorDiv(worldZ, step) * step;
         return RoundMapClient.caveMode
@@ -126,34 +129,42 @@ final class RoundMapTextures {
             : RoundMapFog.color(wx, wz);
     }
 
-    private static boolean covered(Image image, double x, double z,
-                                   int zoom, int padding) {
-        if (image.centerX == Integer.MIN_VALUE || image.zoomKey != zoom) return false;
-        return Math.abs((x - image.centerX) * zoom) < padding * .85
-            && Math.abs((z - image.centerZ) * zoom) < padding * .85;
+    private static double bakedZoom(Image image) {
+        return image.zoomKey <= 0 ? 1.0 : image.zoomKey / 1000.0;
+    }
+
+    private static boolean covers(Image image, double x, double z,
+            double displayZoom, int w, int h, int drawW, int drawH) {
+        if (image.centerX == Integer.MIN_VALUE || image.zoomKey <= 0) return false;
+        // Width of raster expressed in world blocks; zooming is a pure GPU
+        // transform until the new view actually needs additional pixels.
+        double halfWorldW = drawW / (2.0 * bakedZoom(image));
+        double halfWorldH = drawH / (2.0 * bakedZoom(image));
+        double neededW = w / (2.0 * displayZoom);
+        double neededH = h / (2.0 * displayZoom);
+        return Math.abs(image.centerX - x) + neededW + 2 <= halfWorldW
+            && Math.abs(image.centerZ - z) + neededH + 2 <= halfWorldH;
     }
 
     /**
-     * Draw terrain into the CPU-side texture a little at a time.
-     * Consecutive output pixels often represent the same block, so only
-     * evaluate fog/hillshade once per unique world coordinate.
+     * Incrementally fill a CPU-side map texture, uploading it only when all
+     * rows are ready. The previous GPU image remains visible in the meantime.
      */
     private static boolean pump(FullBuild build, Image image,
                                 int maxRows, long budgetNanos) {
         long started = System.nanoTime();
         int end = Math.min(build.texH, build.nextRow + maxRows);
+        double worldBlocksPerTexel = build.drawW / (build.texW * build.zoom);
         for (int py = build.nextRow; py < end; py++) {
             int wz = build.centerZ + (int)Math.floor(
-                (py + .5 - build.texH / 2.0)
-                * build.drawW / (double)(build.texW * build.zoom));
+                (py + .5 - build.texH / 2.0) * worldBlocksPerTexel);
             int lastX = Integer.MIN_VALUE, current = 0;
             for (int px = 0; px < build.texW; px++) {
                 if (wz == build.previousWorldZ) {
                     current = build.lastRow[px];
                 } else {
                     int wx = build.centerX + (int)Math.floor(
-                        (px + .5 - build.texW / 2.0)
-                        * build.drawW / (double)(build.texW * build.zoom));
+                        (px + .5 - build.texW / 2.0) * worldBlocksPerTexel);
                     if (wx != lastX) {
                         current = colorForFullMap(wx, wz);
                         lastX = wx;
@@ -170,101 +181,121 @@ final class RoundMapTextures {
         image.texture.upload();
         image.centerX = build.centerX;
         image.centerZ = build.centerZ;
-        image.zoomKey = build.zoom;
+        image.zoomKey = (int)Math.round(build.zoom * 1000.0);
         image.revision = build.revision;
         image.updatedAt = System.nanoTime();
         return true;
     }
 
     private static FullBuild createBuild(double x, double z,
-                                         int zoom, Image image, int drawW) {
-        return new FullBuild((int)Math.floor(x), (int)Math.floor(z), zoom,
+                                         double zoom, Image image, int drawW) {
+        // Quarter-step texture LOD: GUI animation uses continuous scale, but
+        // terrain needs to be baked only when the user finishes scrolling.
+        double baked = Math.max(0.5, Math.round(zoom * 4.0) / 4.0);
+        return new FullBuild((int)Math.floor(x), (int)Math.floor(z), baked,
             RoundMapAtlas.revision(), drawW, image.width, image.height);
     }
 
     private static void drawMappedImage(GuiGraphics g, Image image,
-            int padding, int drawW, int drawH, double worldX, double worldZ,
-            int zoom) {
-        int offsetX = (int)Math.round((image.centerX - worldX) * zoom);
-        int offsetZ = (int)Math.round((image.centerZ - worldZ) * zoom);
+            int screenW, int screenH, int drawW, int drawH,
+            double worldX, double worldZ, double displayZoom) {
+        if (image.centerX == Integer.MIN_VALUE || image.zoomKey <= 0) return;
+        double ratio = displayZoom / bakedZoom(image);
+        int outW = Math.max(1, (int)Math.round(drawW * ratio));
+        int outH = Math.max(1, (int)Math.round(drawH * ratio));
+        int centerX = screenW / 2 +
+            (int)Math.round((image.centerX - worldX) * displayZoom);
+        int centerY = screenH / 2 +
+            (int)Math.round((image.centerZ - worldZ) * displayZoom);
         g.blit(RenderPipelines.GUI_TEXTURED, image.id,
-            -padding + offsetX, -padding + offsetZ, 0f, 0f,
-            drawW, drawH, image.width, image.height, image.width, image.height);
+            centerX - outW / 2, centerY - outH / 2,
+            0f, 0f, outW, outH,
+            image.width, image.height, image.width, image.height);
     }
 
     /**
-     * Fast 320-pixel terrain preview appears first. The final 1024-pixel
-     * texture then bakes incrementally without blocking the map UI.
+     * Animated zoom is applied to a cached GPU quad EVERY frame, so wheel
+     * zoom never freezes waiting for full texture reconstruction.
+     * A detailed raster is rebuilt only once the zoom settles.
      */
     static void fullscreen(GuiGraphics g, int screenW, int screenH,
-                           double worldX, double worldZ, int zoom, boolean dragging) {
+            double worldX, double worldZ, double zoom,
+            boolean dragging, boolean zooming) {
         final int padding = 256;
         int drawW = screenW + padding * 2;
         int drawH = screenH + padding * 2;
 
-        int tw = Math.min(1024, Math.max(128, drawW));
-        int th = Math.min(1024, Math.max(128,
+        // Higher than alpha.11's 1024px texture: preserve more ground,
+        // coastline and contour detail at typical GUI resolutions.
+        int tw = Math.min(1536, Math.max(128, drawW));
+        int th = Math.min(1536, Math.max(128,
             (int)Math.round(tw * drawH / (double)drawW)));
         FULL.allocate(tw, th);
-
-        int pw = Math.min(320, Math.max(128, drawW));
+        int pw = Math.min(400, Math.max(128, drawW));
         int ph = Math.max(80, (int)Math.round(pw * drawH / (double)drawW));
         PREVIEW.allocate(pw, ph);
 
-        boolean haveFull = covered(FULL, worldX, worldZ, zoom, padding);
-        boolean havePreview = covered(PREVIEW, worldX, worldZ, zoom, padding);
+        boolean fullCovers = covers(FULL, worldX, worldZ, zoom,
+            screenW, screenH, drawW, drawH);
+        boolean previewCovers = covers(PREVIEW, worldX, worldZ, zoom,
+            screenW, screenH, drawW, drawH);
+        boolean haveFull = FULL.centerX != Integer.MIN_VALUE;
+        boolean havePreview = PREVIEW.centerX != Integer.MIN_VALUE;
+        boolean needNewRaster = !fullCovers || FULL.zoomKey <= 0
+            || Math.abs(bakedZoom(FULL) - zoom) > Math.max(0.16, zoom * 0.09);
+        boolean terrainDirty = FULL.revision != RoundMapAtlas.revision() &&
+            (FULL.updatedAt == 0 ||
+             System.nanoTime() - FULL.updatedAt > 650_000_000L);
 
-        // Open a map or pan beyond the previous texture: show a low-detail
-        // viewport promptly rather than waiting for the huge texture bake.
-        if (!haveFull && !havePreview) {
-            if (previewBuild == null || previewBuild.zoom != zoom ||
-                Math.abs((worldX - previewBuild.centerX) * zoom) > padding ||
-                Math.abs((worldZ - previewBuild.centerZ) * zoom) > padding) {
+        // First-open or a big move: prepare cheap preview during dragging,
+        // while the previous detailed texture remains continuously scalable.
+        if (!haveFull && (!havePreview || !previewCovers) && !zooming) {
+            if (previewBuild == null ||
+                Math.abs(previewBuild.zoom - zoom) > Math.max(0.30, zoom * .12) ||
+                Math.abs(previewBuild.centerX - worldX) * zoom > padding ||
+                Math.abs(previewBuild.centerZ - worldZ) * zoom > padding) {
                 previewBuild = createBuild(worldX, worldZ, zoom, PREVIEW, drawW);
             }
-            if (pump(previewBuild, PREVIEW, 42, 3_500_000L)) {
-                previewBuild = null;
-                havePreview = true;
-            }
+        } else if (haveFull && !fullCovers && !zooming
+            && (!havePreview || !previewCovers)) {
+            if (previewBuild == null ||
+                Math.abs(previewBuild.centerX - worldX) * zoom > padding ||
+                Math.abs(previewBuild.centerZ - worldZ) * zoom > padding)
+                previewBuild = createBuild(worldX, worldZ, zoom, PREVIEW, drawW);
+        }
+        if (previewBuild != null && !zooming &&
+            pump(previewBuild, PREVIEW, 48, 2_000_000L)) {
+            previewBuild = null;
+            havePreview = true;
         }
 
-        double shiftX = FULL.centerX == Integer.MIN_VALUE ? 0 :
-            (worldX - FULL.centerX) * zoom;
-        double shiftZ = FULL.centerZ == Integer.MIN_VALUE ? 0 :
-            (worldZ - FULL.centerZ) * zoom;
-        boolean newView = FULL.centerX == Integer.MIN_VALUE || FULL.zoomKey != zoom
-            || Math.abs(shiftX) > padding * .58
-            || Math.abs(shiftZ) > padding * .58;
-        boolean dirty = !dragging && FULL.revision != RoundMapAtlas.revision()
-            && (FULL.updatedAt == 0 ||
-                System.nanoTime() - FULL.updatedAt > 500_000_000L);
-
-        // Prioritize the preview if the player has no map on screen yet.
-        if ((haveFull || havePreview) && fullBuild == null && (newView || dirty)) {
-            fullBuild = newView ? createBuild(worldX, worldZ, zoom, FULL, drawW)
-                : new FullBuild(FULL.centerX, FULL.centerZ, zoom,
-                    RoundMapAtlas.revision(), drawW, FULL.width, FULL.height);
-        }
-        if (fullBuild != null && (fullBuild.zoom != zoom
-            || Math.abs((worldX - fullBuild.centerX) * zoom) > padding * 1.5
-            || Math.abs((worldZ - fullBuild.centerZ) * zoom) > padding * 1.5)) {
+        // Do not restart a bake for each wheel tick or animation frame.
+        // The old high-res texture is scaled immediately on GPU.
+        if (fullBuild != null &&
+            (Math.abs(fullBuild.zoom - zoom) > Math.max(0.18, zoom * 0.09) ||
+             Math.abs(fullBuild.centerX - worldX) * zoom > padding * 1.5 ||
+             Math.abs(fullBuild.centerZ - worldZ) * zoom > padding * 1.5))
             fullBuild = null;
+        if (fullBuild == null && !zooming && !dragging
+            && (needNewRaster || terrainDirty)) {
+            double bakeCenterX = needNewRaster ? worldX : FULL.centerX;
+            double bakeCenterZ = needNewRaster ? worldZ : FULL.centerZ;
+            fullBuild = createBuild(bakeCenterX, bakeCenterZ, zoom, FULL, drawW);
         }
-        if (fullBuild != null && pump(fullBuild, FULL, 32, 2_500_000L)) {
+        if (fullBuild != null && !zooming &&
+            pump(fullBuild, FULL, 34, 2_500_000L)) {
             fullBuild = null;
-            haveFull = covered(FULL, worldX, worldZ, zoom, padding);
+            haveFull = true;
         }
 
-        // Undiscovered blocks always appear as fog, never black/transparent.
         g.fill(0, 0, screenW, screenH,
             RoundMapClient.brightFog ? 0xFFF2F3F7 : 0xFF29313A);
-        if (haveFull) drawMappedImage(g, FULL, padding, drawW, drawH, worldX, worldZ, zoom);
+        if (haveFull)
+            drawMappedImage(g, FULL, screenW, screenH, drawW, drawH,
+                worldX, worldZ, zoom);
         else if (havePreview)
-            drawMappedImage(g, PREVIEW, padding, drawW, drawH, worldX, worldZ, zoom);
-        else if (FULL.centerX != Integer.MIN_VALUE && FULL.zoomKey == zoom)
-            // Retain the edge of the previous view while the user drags into
-            // unexplored space; don't abruptly turn the whole screen blank.
-            drawMappedImage(g, FULL, padding, drawW, drawH, worldX, worldZ, zoom);
+            drawMappedImage(g, PREVIEW, screenW, screenH, drawW, drawH,
+                worldX, worldZ, zoom);
     }
 
     private RoundMapTextures() {}
