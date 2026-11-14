@@ -507,7 +507,8 @@ public final class RoundMapClient implements ClientModInitializer {
                 playerZ >= 47 && playerZ < height - 37)
                 playerArrow(g, mc, playerX, playerZ);
             g.fill(0, 0, width, 35, 0xB018222C);
-            g.drawString(font, "RoundMap  •  Изучено чанков: " + RoundMapAtlas.exploredChunks(),
+            g.drawString(font, "RoundMap  •  Чанков: " + RoundMapAtlas.exploredChunks()
+                + "  •  Подробно: " + RoundMapAtlas.detailedChunks(),
                 10, 12, 0xFFFFFFFF);
             g.fill(0, height - 25, width, height, 0xB018222C);
             int hoveredX = (int)Math.round(targetX + (mouseX - cx) / (double)mapZoom);
