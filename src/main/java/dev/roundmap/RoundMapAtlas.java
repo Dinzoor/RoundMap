@@ -112,13 +112,26 @@ final class RoundMapAtlas {
         return count;
     }
 
-    // Old alpha builds wrote this particular gray whenever the sampled
-    // surface was missing. It is not real terrain and should be fog.
+    /**
+     * Prior alpha builds sometimes cached a near-pure-red model fallback
+     * in entire chunks (the red sea seen when zooming out). Vanilla map
+     * colors and genuine red terrain have substantially more green/blue.
+     * Reject only this very narrow error signature, not ordinary reds.
+     */
+    private static boolean invalidRed(int color) {
+        int r = (color >>> 16) & 255;
+        int g = (color >>> 8) & 255;
+        int b = color & 255;
+        return r >= 175 && g <= 24 && b <= 24 && Math.abs(g - b) <= 10;
+    }
+
+    // Invalid data should become unexplored fog until it can be rescanned.
     private static boolean invalidFallback(int color) {
         int r = (color >>> 16) & 255;
         int g = (color >>> 8) & 255;
         int b = color & 255;
-        return r >= 59 && r <= 109 && g - r == 8 && b == g;
+        return (r >= 59 && r <= 109 && g - r == 8 && b == g)
+            || invalidRed(color);
     }
 
     private static long key(int cx, int cz) {
@@ -381,6 +394,18 @@ final class RoundMapAtlas {
                 ? mapColor.col | 0xFF000000
                 : RoundMapBlockPalette.color(mc, state, ground,
                     mapColor == MapColor.NONE ? 0 : mapColor.col | 0xFF000000);
+            // Never store the known near-pure-red renderer fallback again.
+            // Prefer the vanilla material color when a custom texture fails;
+            // unsupported pure-red-only models remain uncharted.
+            if (invalidRed(color)) {
+                if (mapColor != MapColor.NONE &&
+                    !invalidRed(mapColor.col)) {
+                    color = mapColor.col | 0xFF000000;
+                } else {
+                    active = Long.MIN_VALUE;
+                    continue;
+                }
+            }
             // A lightweight biome-aware material palette. Capture only on the
             // client tick; no live biome queries happen while drawing the map.
             if (state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.MOSS_BLOCK)) {
