@@ -262,14 +262,69 @@ public final class RoundMapClient implements ClientModInitializer {
 
     private static void waypointPin(GuiGraphics g, Minecraft mc, int x, int y,
                                     Marker marker, boolean small) {
-        int r = small ? 5 : 8;
-        g.fill(x - r - 1, y - r - 2, x + r + 2, y + r + 1, 0xFF172029);
-        g.fill(x - r, y - r - 1, x + r + 1, y + r, marker.color());
-        g.fill(x - 2, y + r, x + 3, y + r + (small ? 3 : 5), 0xFF172029);
-        g.fill(x - 1, y + r, x + 2, y + r + (small ? 2 : 4), marker.color());
-        String glyph = markerSymbol(marker);
-        if (glyph.length() > 2) glyph = glyph.substring(0, 2);
-        g.drawCenteredString(mc.font, glyph, x, y - 4, 0xFF121C27);
+        int radius = small ? 6 : 9;
+        int outline = 0xFF1D2931;
+        // Original RoundMap pixel-art marker: circular head and a pin tail.
+        for (int yy = -radius - 1; yy <= radius + 1; yy++) {
+            int edge = (int)Math.sqrt(Math.max(0,
+                (radius + 1) * (radius + 1) - yy * yy));
+            g.fill(x - edge, y + yy, x + edge + 1, y + yy + 1, outline);
+        }
+        for (int yy = -radius + 1; yy <= radius - 1; yy++) {
+            int edge = (int)Math.sqrt(Math.max(0,
+                (radius - 1) * (radius - 1) - yy * yy));
+            g.fill(x - edge, y + yy, x + edge + 1, y + yy + 1, marker.color());
+        }
+        int tail = small ? 4 : 5;
+        for (int row = 0; row < tail; row++) {
+            int edge = Math.max(1, 3 - row / 2);
+            g.fill(x - edge, y + radius + row - 1, x + edge + 1,
+                y + radius + row, outline);
+            g.fill(x - 1, y + radius + row - 2, x + 2,
+                y + radius + row - 1, marker.color());
+        }
+        if (!marker.initials().isEmpty()) {
+            String initials = marker.initials();
+            if (initials.length() > 2) initials = initials.substring(0, 2);
+            g.drawCenteredString(mc.font, initials, x, y - 4, 0xFF14212B);
+            return;
+        }
+        // Simple original icons drawn procedurally to avoid shipping
+        // third-party sprite assets inside RoundMap.
+        switch (marker.icon()) {
+            case 1 -> { // house
+                g.fill(x - 4, y, x + 5, y + 4, 0xFF203141);
+                g.fill(x - 3, y - 2, x + 4, y, 0xFFF6F4EB);
+                g.fill(x - 1, y + 1, x + 2, y + 4, 0xFFE9C45B);
+            }
+            case 2 -> { // bed
+                g.fill(x - 5, y - 2, x + 5, y + 3, 0xFF1D2830);
+                g.fill(x - 4, y - 1, x - 1, y + 2, 0xFFFFFFFF);
+                g.fill(x - 1, y - 1, x + 4, y + 2, 0xFFFF5555);
+                g.fill(x - 5, y + 3, x - 3, y + 5, 0xFF27303A);
+                g.fill(x + 3, y + 3, x + 5, y + 5, 0xFF27303A);
+            }
+            case 3 -> { // portal
+                g.fill(x - 4, y - 5, x + 4, y + 5, 0xFF142333);
+                g.fill(x - 2, y - 3, x + 2, y + 3, 0xFFA34BDF);
+                g.fill(x - 1, y - 2, x + 1, y + 2, 0xFF6237B5);
+            }
+            case 7 -> { // chest
+                g.fill(x - 5, y - 3, x + 5, y + 4, 0xFF614021);
+                g.fill(x - 4, y - 2, x + 4, y, 0xFFB8864C);
+                g.fill(x - 1, y - 1, x + 2, y + 3, 0xFFF4D260);
+            }
+            case 8 -> { // skull
+                g.fill(x - 4, y - 4, x + 5, y + 3, 0xFFF0EADA);
+                g.fill(x - 3, y - 1, x - 1, y + 1, 0xFF20303A);
+                g.fill(x + 1, y - 1, x + 3, y + 1, 0xFF20303A);
+                g.fill(x - 2, y + 3, x + 3, y + 5, 0xFFDEDBCC);
+            }
+            default -> {
+                g.drawCenteredString(mc.font, MARKER_ICONS[marker.icon()],
+                    x, y - 4, 0xFF152433);
+            }
+        }
     }
 
     @Override public void onInitializeClient() {
