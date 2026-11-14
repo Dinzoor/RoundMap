@@ -498,6 +498,8 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final class MapScreen extends Screen {
         private double panX, panZ, oldX, oldY;
         private boolean wasDragging, wasRight, lastPlus, lastMinus;
+        private boolean contextOpen;
+        private int contextX, contextY, clickedX, clickedY, clickedZ;
         private MapScreen() { super(Component.literal("RoundMap")); }
         // Keep client ticks running in singleplayer while the map is open so
         // nearby rendered chunks can continue to appear on the atlas.
@@ -511,6 +513,10 @@ public final class RoundMapClient implements ClientModInitializer {
             }
         }
         private void zoom(int amount) { mapZoom = Math.max(1, Math.min(10, mapZoom + amount)); }
+        private void rebuild() {
+            clearWidgets();
+            init();
+        }
         @Override protected void init() {
             int y = 8;
             addRenderableWidget(Button.builder(Component.literal("Точки"), b ->
@@ -532,6 +538,32 @@ public final class RoundMapClient implements ClientModInitializer {
                 int z = minecraft.player.getBlockZ() + (int)Math.round(panZ);
                 minecraft.setScreen(new NameScreen(x, z, minecraft.level.dimension().toString(), this));
             }).bounds(rx, cy + 35, 24, 24).build());
+            if (contextOpen) {
+                int x = contextX, top = contextY;
+                addRenderableWidget(Button.builder(Component.literal("Добавить точку"), b ->
+                    minecraft.setScreen(new NameScreen(clickedX, clickedZ,
+                        minecraft.level.dimension().toString(), this)))
+                    .bounds(x, top + 25, 190, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Временная точка"), b -> {
+                    markers.add(new Marker(clickedX, clickedY, clickedZ,
+                        minecraft.level.dimension().toString(), "Временная",
+                        MARKER_COLORS[1], 0, "!", "Основная", true, true));
+                    contextOpen = false; rebuild();
+                }).bounds(x, top + 48, 190, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Копировать координаты"), b -> {
+                    GLFW.glfwSetClipboardString(minecraft.getWindow().handle(),
+                        clickedX + " " + clickedY + " " + clickedZ);
+                    contextOpen = false; rebuild();
+                }).bounds(x, top + 71, 190, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Поделиться (копировать)"), b -> {
+                    GLFW.glfwSetClipboardString(minecraft.getWindow().handle(),
+                        "X: " + clickedX + ", Y: " + clickedY + ", Z: " + clickedZ);
+                    contextOpen = false; rebuild();
+                }).bounds(x, top + 94, 190, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Закрыть"), b -> {
+                    contextOpen = false; rebuild();
+                }).bounds(x, top + 117, 190, 20).build());
+            }
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
             Minecraft mc = Minecraft.getInstance();
@@ -566,14 +598,30 @@ public final class RoundMapClient implements ClientModInitializer {
             g.fill(0, height - 25, width, height, 0xB018222C);
             int hoveredX = (int)Math.round(targetX + (mouseX - cx) / (double)mapZoom);
             int hoveredZ = (int)Math.round(targetZ + (mouseY - cy) / (double)mapZoom);
-            g.drawString(font, "ЛКМ: сдвиг   Колесо: масштаб   ПКМ: добавить точку   M: закрыть",
+            int hoveredY = RoundMapAtlas.heightAt(hoveredX, hoveredZ);
+            if (hoveredY == Short.MIN_VALUE) hoveredY = mc.player.getBlockY();
+            g.drawString(font, "ЛКМ: сдвиг   Колесо: масштаб   ПКМ: меню   M: закрыть",
                 8, height - 17, 0xFFE3E6EB);
-            g.drawString(font, "X " + hoveredX + " Z " + hoveredZ,
-                Math.max(0, width - 140), height - 17, 0xFFFFFFFF);
+            int meters = (int)Math.round(Math.hypot(hoveredX - mc.player.getBlockX(),
+                hoveredZ - mc.player.getBlockZ()));
+            g.drawString(font, "X " + hoveredX + " Y " + hoveredY +
+                " Z " + hoveredZ + "  • " + meters + " м",
+                Math.max(0, width - 210), height - 17, 0xFFFFFFFF);
+            if (contextOpen) {
+                g.fill(contextX - 3, contextY - 4,
+                    contextX + 193, contextY + 142, 0xED10181F);
+                g.drawString(font, clickedX + ", " + clickedY + ", " +
+                    clickedZ + "  •  ПКМ", contextX + 5, contextY + 7, 0xFFCBD5DF);
+            }
             super.render(g, mouseX, mouseY, delta);
             boolean right = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS;
-            if (right && !wasRight && mouseY > 35 && mouseY < height - 25 && mouseX < width - 38) {
-                minecraft.setScreen(new NameScreen(hoveredX, hoveredZ, mc.level.dimension().toString(), this));
+            if (right && !wasRight && mouseY > 35 && mouseY < height - 25
+                && mouseX < width - 38) {
+                contextOpen = true;
+                contextX = Math.max(4, Math.min(width - 198, mouseX));
+                contextY = Math.max(40, Math.min(height - 169, mouseY));
+                clickedX = hoveredX; clickedY = hoveredY; clickedZ = hoveredZ;
+                rebuild();
             }
             wasRight = right;
             boolean plus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_EQUAL) == GLFW.GLFW_PRESS;
