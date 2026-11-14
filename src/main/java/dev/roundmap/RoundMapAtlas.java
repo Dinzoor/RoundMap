@@ -483,6 +483,8 @@ final class RoundMapAtlas {
             Tile tile = tiles.computeIfAbsent(active, k -> new Tile());
             if (activeIndex >= (activeStep == 16 ? 1 : activeStep == 4 ? 16 : 256)) {
                 tile.stage = Math.max(tile.stage, activeStep == 16 ? 1 : activeStep == 4 ? 2 : 3);
+                if (activeMicro) microReady.add(active);
+                activeMicro = false;
                 active = Long.MIN_VALUE;
                 revision++;
                 dirty = true;
@@ -638,6 +640,19 @@ final class RoundMapAtlas {
                 tile.pixels[cell] = color;
                 tile.heights[cell] = altitude;
                 tile.lights[cell] = light;
+                if (activeMicro) {
+                    int[] micro = microTiles.get(active);
+                    if (micro == null) {
+                        micro = new int[4096];
+                        // Unfinished block samples fall back to cached
+                        // normal colors rather than flashing black.
+                        for (int c = 0; c < 256; c++)
+                            Arrays.fill(micro, c * 16, c * 16 + 16, tile.pixels[c]);
+                        microTiles.put(active, micro);
+                    }
+                    RoundMapBlockPalette.fillMicro(mc, state, ground,
+                        color, micro, cell * 16);
+                }
             }
             activeIndex++;
             budget--;
@@ -661,9 +676,11 @@ final class RoundMapAtlas {
             } else if (!nearbyMedium.isEmpty()) {
                 stage = 2; next = nearbyMedium.pollFirst();
             } else if (!nearbyFine.isEmpty()) {
-                // Repair gray/incorrect terrain directly under the player
-                // before surveying distant low-resolution chunk previews.
+                // Always first resolve individual blocks near the player.
                 stage = 3; next = nearbyFine.pollFirst();
+            } else if (!nearbyMicro.isEmpty()) {
+                // Then fill 4x4 texture details from client-visible blocks.
+                stage = 4; next = nearbyMicro.pollFirst();
             } else if (!coarseQueue.isEmpty()) {
                 stage = 1; next = coarseQueue.pollFirst();
             } else if (!mediumQueue.isEmpty()) {
@@ -674,12 +691,20 @@ final class RoundMapAtlas {
             if (next == null) return false;
             Tile t = tiles.get(next);
             if (t != null && t.stage >= stage) continue;
+            if (stage == 4 && microReady.contains(next)) continue;
             int tx = (int)(next >> 32), tz = (int)(long)next;
             // No disk load or world generation is triggered by hasChunkAt.
             if (!mc.level.hasChunkAt(new BlockPos(tx * 16, 0, tz * 16))) continue;
             active = next;
             activeIndex = 0;
+            activeTarget = stage;
             activeStep = stage == 1 ? 16 : stage == 2 ? 4 : 1;
+            // Never allocate sub-block texture buffers for the distant
+            // discovery passes or when the large map is closed.
+            activeMicro = activeStep == 1 &&
+                RoundMapClient.highDetailMapVisible() &&
+                Math.max(Math.abs(tx - (mc.player.getBlockX() >> 4)),
+                         Math.abs(tz - (mc.player.getBlockZ() >> 4))) <= 4;
             return true;
         }
         return false;
@@ -729,6 +754,12 @@ final class RoundMapAtlas {
                         (radius <= 1 ? nearbyMedium : mediumQueue).addLast(k);
                     if (detailed && stage < 3)
                         (radius <= 2 ? nearbyFine : fineQueue).addLast(k);
+                    // The optional 4x4 layer is only populated for the
+                    // player's local area when zoomed in on the full map.
+                    if (RoundMapClient.highDetailMapVisible() &&
+                        radius <= 3 && stage >= 3 &&
+                        !microReady.contains(k))
+                        nearbyMicro.addLast(k);
                 }
             }
         }
