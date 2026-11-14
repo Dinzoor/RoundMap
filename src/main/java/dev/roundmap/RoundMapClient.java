@@ -58,6 +58,9 @@ public final class RoundMapClient implements ClientModInitializer {
     // Pixel-art grid in world blocks. Larger steps produce crisp, larger
     // squares on both the circular minimap and the fullscreen map.
     static int mapPixelSize = 2;
+    // Fullscreen terrain defaults to one sampled block per map cell,
+    // independent of the intentionally pixelated HUD minimap.
+    static int fullPixelSize = 1;
     static boolean caveMode;
     static boolean caveScreenActive() {
         return caveMode && Minecraft.getInstance().screen instanceof MapScreen;
@@ -86,6 +89,8 @@ public final class RoundMapClient implements ClientModInitializer {
             miniSize = Math.max(24, Math.min(120, miniSize));
             mapPixelSize = Math.max(1, Math.min(4,
                 Integer.parseInt(p.getProperty("pixelSize", "2"))));
+            fullPixelSize = Math.max(1, Math.min(4,
+                Integer.parseInt(p.getProperty("fullPixelSize", "1"))));
             showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
             showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
             showBiome = Boolean.parseBoolean(p.getProperty("biome", "true"));
@@ -129,6 +134,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("y", Double.toString(miniY));
         p.setProperty("size", Integer.toString(miniSize));
         p.setProperty("pixelSize", Integer.toString(mapPixelSize));
+        p.setProperty("fullPixelSize", Integer.toString(fullPixelSize));
         p.setProperty("zoom", Double.toString(miniZoom));
         p.setProperty("visible", Boolean.toString(showMini));
         p.setProperty("coords", Boolean.toString(showCoords));
@@ -1086,11 +1092,19 @@ public final class RoundMapClient implements ClientModInitializer {
                     savePosition();
                 });
                 option(right, top + step * 2, cw,
-                    "Пикселизация: " + mapPixelSize + "×" + mapPixelSize, () -> {
+                    "Пиксели мини-карты: " + mapPixelSize + "×" + mapPixelSize, () -> {
                     mapPixelSize = mapPixelSize == 4 ? 1 : mapPixelSize + 1;
                     RoundMapTextures.invalidate();
                     savePosition();
                 });
+                option(left, top + step * 3, cw,
+                    "Детализация большой карты: " +
+                        (fullPixelSize == 1 ? "Максимальная" : fullPixelSize + "×" + fullPixelSize),
+                    () -> {
+                        fullPixelSize = fullPixelSize == 4 ? 1 : fullPixelSize + 1;
+                        RoundMapTextures.invalidate();
+                        savePosition();
+                    });
             }
             addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
                 minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
