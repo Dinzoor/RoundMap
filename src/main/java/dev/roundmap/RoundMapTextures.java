@@ -85,7 +85,9 @@ final class RoundMapTextures {
 
     static void minimap(GuiGraphics g, int cx, int cy, int radius,
                         double zoom, int playerX, int playerZ) {
-        int pixels = 160;
+        // A near 1:1 HUD texture avoids shrinking 160 texels into 96
+        // screen pixels; nearest-style block cells remain visibly crisp.
+        int pixels = 96;
         MINI.allocate(pixels, pixels);
         int zoomKey = (int)Math.round(zoom * 1000);
         if (MINI.needsRefresh(playerX, playerZ, zoomKey, 240_000_000L)) {
@@ -99,6 +101,9 @@ final class RoundMapTextures {
                     } else {
                         int wx = playerX + (int)Math.floor(x * scale);
                         int wz = playerZ + (int)Math.floor(y * scale);
+                        int step = RoundMapClient.mapPixelSize;
+                        wx = Math.floorDiv(wx, step) * step;
+                        wz = Math.floorDiv(wz, step) * step;
                         int color = RoundMapFog.color(wx, wz);
                         int alpha = Math.max(0, Math.min(255, RoundMapClient.miniOpacity * 255 / 100));
                         MINI.pixels.setPixel(px, py, (color & 0x00FFFFFF) | (alpha << 24));
@@ -113,9 +118,12 @@ final class RoundMapTextures {
     }
 
     private static int colorForFullMap(int worldX, int worldZ) {
+        int step = RoundMapClient.mapPixelSize;
+        int wx = Math.floorDiv(worldX, step) * step;
+        int wz = Math.floorDiv(worldZ, step) * step;
         return RoundMapClient.caveMode
-            ? RoundMapCaveAtlas.renderColor(worldX, worldZ)
-            : RoundMapFog.color(worldX, worldZ);
+            ? RoundMapCaveAtlas.renderColor(wx, wz)
+            : RoundMapFog.color(wx, wz);
     }
 
     private static boolean covered(Image image, double x, double z,
