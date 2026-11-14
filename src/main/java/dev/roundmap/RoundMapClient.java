@@ -713,40 +713,134 @@ public final class RoundMapClient implements ClientModInitializer {
     private static final class WaypointListScreen extends Screen {
         private final Screen parent;
         private final int page;
+        private final String search, folder;
+        private EditBox filterInput;
+        private boolean ready;
+
         private WaypointListScreen(Screen parent, int page) {
-            super(Component.literal("RoundMap waypoints"));
+            this(parent, page, "", "Все папки");
+        }
+        private WaypointListScreen(Screen parent, int page, String search, String folder) {
+            super(Component.literal("Точки RoundMap"));
             this.parent = parent;
             this.page = Math.max(0, page);
+            this.search = search; this.folder = folder;
+        }
+        private List<Marker> filtered() {
+            List<Marker> results = new ArrayList<>();
+            for (Marker marker : markers) {
+                if (!folder.equals("Все папки") && !folder.equals(marker.folder())) continue;
+                String text = search.toLowerCase(java.util.Locale.ROOT).trim();
+                if (!text.isEmpty() &&
+                    !marker.name().toLowerCase(java.util.Locale.ROOT).contains(text) &&
+                    !marker.folder().toLowerCase(java.util.Locale.ROOT).contains(text))
+                    continue;
+                results.add(marker);
+            }
+            return results;
         }
         @Override protected void init() {
-            int x = width / 2 - 150, y = 44;
-            int perPage = Math.max(1, Math.min(8, (height - 110) / 26));
+            int left = Math.max(6, width / 2 - 210), total = Math.min(width - left - 6, 420);
+            int upper = 43;
+            filterInput = new EditBox(font, left, upper, Math.max(65, total / 2 - 5),
+                20, Component.literal("Поиск точек"));
+            filterInput.setMaxLength(40);
+            filterInput.setValue(search);
+            addRenderableWidget(filterInput);
+            filterInput.setResponder(value -> {
+                if (ready && !value.equals(search))
+                    minecraft.setScreen(new WaypointListScreen(parent, 0, value, folder));
+            });
+            ready = true;
+            addRenderableWidget(Button.builder(Component.literal("Папка: " + folder), b -> {
+                int at = folder.equals("Все папки") ? -1 : folders.indexOf(folder);
+                String next = at + 1 >= folders.size() ? "Все папки" : folders.get(at + 1);
+                minecraft.setScreen(new WaypointListScreen(parent, 0, search, next));
+            }).bounds(left + total / 2, upper, total - total / 2, 20).build());
+            List<Marker> matches = filtered();
+            int perPage = Math.max(1, Math.min(8, (height - 180) / 27));
             int start = page * perPage;
-            for (int i = start; i < Math.min(markers.size(), start + perPage); i++) {
-                final Marker marker = markers.get(i);
-                final int index = i;
-                int row = i - start;
-                addRenderableWidget(Button.builder(Component.literal(marker.name() + " [" + marker.x() + ", " + marker.y() + ", " + marker.z() + "]"),
-                    b -> minecraft.setScreen(new MapScreen(marker.x(), marker.z())))
-                    .bounds(x, y + row * 26, 245, 20).build());
-                addRenderableWidget(Button.builder(Component.literal("X"), b -> {
-                    markers.remove(marker);
+            int y = upper + 31;
+            for (int i = start; i < Math.min(matches.size(), start + perPage); i++) {
+                Marker marker = matches.get(i);
+                int yRow = y + (i - start) * 27;
+                int actionWidth = 40, nameWidth = Math.max(80, total - 3 * actionWidth - 12);
+                addRenderableWidget(Button.builder(Component.literal(
+                    MARKER_ICONS[marker.icon()] + " " + marker.name() +
+                    " [" + marker.x() + "," + marker.y() + "," + marker.z() + "]"), b ->
+                    minecraft.setScreen(new MapScreen(marker.x(), marker.z())))
+                    .bounds(left, yRow, nameWidth, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Изм"), b ->
+                    minecraft.setScreen(new NameScreen(marker, this)))
+                    .bounds(left + nameWidth + 4, yRow, actionWidth, 20).build());
+                addRenderableWidget(Button.builder(Component.literal(
+                    marker.visible() ? "Вкл" : "Вык"), b -> {
+                    int at = markers.indexOf(marker);
+                    if (at >= 0) markers.set(at, marker.withVisible(!marker.visible()));
                     saveMarkers();
-                    minecraft.setScreen(new WaypointListScreen(parent, Math.min(page, Math.max(0, (markers.size()-1)/perPage))));
-                }).bounds(x + 250, y + row * 26, 40, 20).build());
+                    minecraft.setScreen(new WaypointListScreen(parent, page, search, folder));
+                }).bounds(left + nameWidth + actionWidth + 8, yRow, actionWidth, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("X"), b -> {
+                    markers.remove(marker); saveMarkers();
+                    minecraft.setScreen(new WaypointListScreen(parent, Math.min(page,
+                        Math.max(0, (filtered().size() - 1) / perPage)), search, folder));
+                }).bounds(left + nameWidth + actionWidth * 2 + 12, yRow, actionWidth, 20).build());
             }
+            int controls = height - 79;
             if (page > 0) addRenderableWidget(Button.builder(Component.literal("<"), b ->
-                minecraft.setScreen(new WaypointListScreen(parent, page - 1)))
-                .bounds(width / 2 - 105, height - 57, 90, 20).build());
-            if (start + perPage < markers.size()) addRenderableWidget(Button.builder(Component.literal(">"), b ->
-                minecraft.setScreen(new WaypointListScreen(parent, page + 1)))
-                .bounds(width / 2 + 15, height - 57, 90, 20).build());
+                minecraft.setScreen(new WaypointListScreen(parent, page - 1, search, folder)))
+                .bounds(left, controls, 42, 20).build());
+            if (start + perPage < matches.size())
+                addRenderableWidget(Button.builder(Component.literal(">"), b ->
+                    minecraft.setScreen(new WaypointListScreen(parent, page + 1, search, folder)))
+                    .bounds(left + 46, controls, 42, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Новая папка"), b ->
+                minecraft.setScreen(new FolderQuickScreen(this)))
+                .bounds(left + total - 201, controls, 98, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Новая точка"), b -> {
+                if (minecraft.player != null && minecraft.level != null)
+                    minecraft.setScreen(new NameScreen(minecraft.player.getBlockX(),
+                        minecraft.player.getBlockZ(), minecraft.level.dimension().toString(), this));
+            }).bounds(left + total - 99, controls, 99, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
-                minecraft.setScreen(parent)).bounds(width / 2 - 80, height - 30, 160, 20).build());
+                minecraft.setScreen(parent)).bounds(width / 2 - 85, height - 38, 170, 20).build());
+            setInitialFocus(filterInput);
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xC51B232D);
             super.render(g, mouseX, mouseY, delta);
-            g.drawCenteredString(font, "Сохранённые точки: " + markers.size(), width / 2, 20, -1);
+            g.drawCenteredString(font, "Точки  •  " + filtered().size() +
+                "  •  папок: " + folders.size(), width / 2, 19, 0xFFFFFFFF);
+        }
+    }
+
+    private static final class FolderQuickScreen extends Screen {
+        private final Screen parent;
+        private EditBox nameInput;
+        private FolderQuickScreen(Screen parent) {
+            super(Component.literal("Новая папка"));
+            this.parent = parent;
+        }
+        @Override protected void init() {
+            int x = width / 2 - 125, y = height / 2 - 20;
+            nameInput = new EditBox(font, x, y, 250, 20, Component.literal("Название папки"));
+            nameInput.setMaxLength(32);
+            addRenderableWidget(nameInput); setInitialFocus(nameInput);
+            addRenderableWidget(Button.builder(Component.literal("Создать"), b -> {
+                String name = nameInput.getValue().trim();
+                if (!name.isEmpty() && !folders.contains(name)) {
+                    folders.add(name); saveMarkers();
+                }
+                minecraft.setScreen(parent);
+            }).bounds(x, y + 30, 122, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Отмена"), b ->
+                minecraft.setScreen(parent)).bounds(x + 128, y + 30, 122, 20).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xC51B232D);
+            super.render(g, mouseX, mouseY, delta);
+            g.drawCenteredString(font, "Создать папку для точек", width / 2,
+                height / 2 - 43, 0xFFFFFFFF);
         }
     }
 
