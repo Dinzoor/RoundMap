@@ -61,6 +61,7 @@ public final class RoundMapClient implements ClientModInitializer {
     // Fullscreen terrain defaults to one sampled block per map cell,
     // independent of the intentionally pixelated HUD minimap.
     static int fullPixelSize = 1;
+    static boolean ultraTextureDetail = true;
     static boolean caveMode;
     static boolean caveScreenActive() {
         return caveMode && Minecraft.getInstance().screen instanceof MapScreen;
@@ -98,6 +99,8 @@ public final class RoundMapClient implements ClientModInitializer {
                 Integer.parseInt(p.getProperty("pixelSize", "1"))));
             fullPixelSize = Math.max(1, Math.min(4,
                 Integer.parseInt(p.getProperty("fullPixelSize", "1"))));
+            ultraTextureDetail = Boolean.parseBoolean(
+                p.getProperty("ultraTextureDetail", "true"));
             showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
             showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
             showBiome = Boolean.parseBoolean(p.getProperty("biome", "true"));
@@ -142,6 +145,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("size", Integer.toString(miniSize));
         p.setProperty("pixelSize", Integer.toString(mapPixelSize));
         p.setProperty("fullPixelSize", Integer.toString(fullPixelSize));
+        p.setProperty("ultraTextureDetail", Boolean.toString(ultraTextureDetail));
         p.setProperty("zoom", Double.toString(miniZoom));
         p.setProperty("miniZoomUnits", "pixels_per_block");
         p.setProperty("visible", Boolean.toString(showMini));
@@ -741,8 +745,9 @@ public final class RoundMapClient implements ClientModInitializer {
     }
 
     static boolean highDetailMapVisible() {
-        return !caveMode && Minecraft.getInstance().screen instanceof MapScreen map
-            && map.visualZoom >= 2.0;
+        return ultraTextureDetail && RoundMapAtlas.detailed && !caveMode &&
+            Minecraft.getInstance().screen instanceof MapScreen map &&
+            map.visualZoom >= 2.0;
     }
 
     private static final class MapScreen extends Screen {
@@ -1165,6 +1170,14 @@ public final class RoundMapClient implements ClientModInitializer {
                         (fullPixelSize == 1 ? "Максимальная" : fullPixelSize + "×" + fullPixelSize),
                     () -> {
                         fullPixelSize = fullPixelSize == 4 ? 1 : fullPixelSize + 1;
+                        RoundMapTextures.invalidate();
+                        savePosition();
+                    });
+                option(right, top + step * 3, cw,
+                    "Текстуры внутри блока: " + (ultraTextureDetail ? "4×4" : "Выкл"),
+                    () -> {
+                        ultraTextureDetail = !ultraTextureDetail;
+                        RoundMapAtlas.forceRefresh();
                         RoundMapTextures.invalidate();
                         savePosition();
                     });
