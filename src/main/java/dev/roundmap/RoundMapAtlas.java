@@ -55,7 +55,7 @@ final class RoundMapAtlas {
     });
     private static final Map<Long, Tile> tiles = new HashMap<>();
     // Four-by-four texture samples per mapped block, held only near the
-    // player while the fullscreen map is highly zoomed. Max about 16 MiB.
+    // player while the fullscreen map is highly zoomed. Max about 4 MiB.
     private static final int MICRO_CAP = 256;
     private static final Set<Long> microReady = new HashSet<>();
     private static final LinkedHashMap<Long, int[]> microTiles =
