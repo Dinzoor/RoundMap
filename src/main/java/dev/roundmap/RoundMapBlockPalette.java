@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.BlockModelPart;
@@ -58,26 +59,64 @@ final class RoundMapBlockPalette {
             sample = loadSample(mc, spriteName);
             samples.put(spriteName, sample);
         }
-        if (sample == null) return fallback;
+        if (sample == null || suspiciousMissingSample(sample)) return fallback;
         int pixel = sample.grid()[((pos.getZ() & 7) << 3) | (pos.getX() & 7)];
         // Average ensures visually stable large-scale colors, while one of
         // 64 texture samples preserves local texture variation.
         return blend(sample.average(), pixel, 45);
     }
 
+    // Not a general filter for red blocks! Only obviously defective,
+    // nearly solid red/magenta *texture assets* are treated as missing.
+    // The last alpha was filtering output colors and turning most of this
+    // custom server's terrain into flat gray.
+    private static boolean suspiciousMissingSample(TextureSample sample) {
+        int[] grid = sample.grid();
+        int bad = 0;
+        for (int c : grid) {
+            int r = (c >>> 16) & 255, g = (c >>> 8) & 255, b = c & 255;
+            if ((r > 230 && g < 35 && b < 35) ||
+                (r > 225 && b > 220 && g < 40)) bad++;
+        }
+        return bad >= 54; // At least 84% of samples are placeholder-like.
+    }
+
+    private static TextureSample sampleFor(Minecraft mc, Identifier name) {
+        if (!samples.containsKey(name)) samples.put(name, loadSample(mc, name));
+        return samples.get(name);
+    }
+
     private static Identifier findSprite(Minecraft mc, BlockState state, BlockPos pos) {
         try {
             BlockStateModel model = mc.getBlockRenderer().getBlockModel(state);
-            List<BlockModelPart> parts = model.collectParts(RandomSource.create(state.getSeed(pos)));
+            List<BlockModelPart> parts =
+                model.collectParts(RandomSource.create(state.getSeed(pos)));
+            LinkedHashSet<Identifier> candidates = new LinkedHashSet<>();
+            // A top-down map prefers upward faces; a custom block may have
+            // multiple layers and use a placeholder texture on the first one.
             for (BlockModelPart part : parts) {
-                List<BakedQuad> up = part.getQuads(Direction.UP);
-                if (!up.isEmpty()) return up.getFirst().sprite().contents().name();
+                for (BakedQuad quad : part.getQuads(Direction.UP))
+                    candidates.add(quad.sprite().contents().name());
+            }
+            // Some custom multipart models have no culled UP quads.
+            for (BlockModelPart part : parts) {
+                for (BakedQuad quad : part.getQuads(null))
+                    candidates.add(quad.sprite().contents().name());
             }
             TextureAtlasSprite icon = model.particleIcon();
-            return icon == null ? null : icon.contents().name();
+            if (icon != null) candidates.add(icon.contents().name());
+            Identifier firstReadable = null;
+            for (Identifier candidate : candidates) {
+                if (candidate.getPath().contains("missingno")) continue;
+                TextureSample sample = sampleFor(mc, candidate);
+                if (sample == null) continue;
+                if (firstReadable == null) firstReadable = candidate;
+                if (!suspiciousMissingSample(sample)) return candidate;
+            }
+            // Prefer fallback MapColor if every candidate is a
+            // missing-placeholder asset, not a red false positive.
+            return firstReadable == null ? null : firstReadable;
         } catch (RuntimeException e) {
-            // Vanilla MapColor is always a safe fallback for unsupported
-            // dynamic or unconventional resource-pack models.
             return null;
         }
     }
