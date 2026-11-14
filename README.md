@@ -1,4 +1,4 @@
-# RoundMap — Fabric Minecraft 1.21.11 (0.2.0-alpha.9)
+# RoundMap — Fabric Minecraft 1.21.11 (0.2.0-alpha.22)
 
 RoundMap is an experimental client-side world map for Minecraft Java 1.21.11 and Fabric. Source, interface and map graphics are original to RoundMap; Diorama was reviewed as a feature reference.
 
@@ -34,9 +34,11 @@ RoundMap is an experimental client-side world map for Minecraft Java 1.21.11 and
 
 ## Performance
 
-Surface scan has three levels: rapid per-chunk overview, medium 4×4 preview and final 16×16 block sampling. Block reads are capped by both an adjustable sample count and a short main-thread work budget. Fullscreen textures use 320px preview followed by a cached 1024px detailed texture. Disk compression runs off the render thread.
+The persistent surface atlas scans in three stages: one fast preview per chunk, a medium 4×4 sample grid, and finally one sample **per block**. The fullscreen renderer chooses an adaptive level of detail: overview colors when far away, block colors at medium zoom, and **4×4 actual model-texture subpixels within individual blocks** at zoom ≥2, where those textures are available.
 
-Use **Вид → Сканирование** to tune the budget (32, 64, 128 or 256 samples/tick). Map quality can be toggled between detailed and faster. Shader/Iris/Sodium compatibility and FPS must be tested in game.
+The optional high-zoom texture cache is populated only by bounded client-tick scanning close to the player. It is an in-memory LRU capped at 256 chunks (about 16 MiB), **not persisted to disk**; the normal one-color-per-block atlas is saved as before. The map never asks for unloaded chunks and does not reveal undiscovered terrain. Fullscreen images use a fast 400px preview followed by a capped 2048px detailed GPU texture, built incrementally rather than in one expensive frame. The small HUD minimap still uses a separate 96px texture to protect FPS.
+
+**Settings → Вид:** "Качество: Детально" for per-block scanning; "Детализация большой карты: Максимальная" for one full-map cell per block; "Текстуры внутри блока: 4×4" for high-zoom details (turn off for performance). "Сканирование" controls the sample cap (32/64/128/256), with an independent ~4ms scan-time limit. Behavior and FPS on Iris/Sodium and server resource packs still need in-game verification.
 
 ## Important limitations
 
