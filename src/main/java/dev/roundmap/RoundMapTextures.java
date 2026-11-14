@@ -112,6 +112,12 @@ final class RoundMapTextures {
             radius * 2, radius * 2, pixels, pixels, pixels, pixels);
     }
 
+    private static int colorForFullMap(int worldX, int worldZ) {
+        return RoundMapClient.caveMode
+            ? RoundMapCaveAtlas.renderColor(worldX, worldZ)
+            : RoundMapFog.color(worldX, worldZ);
+    }
+
     private static boolean covered(Image image, double x, double z,
                                    int zoom, int padding) {
         if (image.centerX == Integer.MIN_VALUE || image.zoomKey != zoom) return false;
@@ -141,7 +147,7 @@ final class RoundMapTextures {
                         (px + .5 - build.texW / 2.0)
                         * build.drawW / (double)(build.texW * build.zoom));
                     if (wx != lastX) {
-                        current = RoundMapFog.color(wx, wz);
+                        current = colorForFullMap(wx, wz);
                         lastX = wx;
                     }
                     build.lastRow[px] = current;
