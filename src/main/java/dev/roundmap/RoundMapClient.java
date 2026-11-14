@@ -55,6 +55,9 @@ public final class RoundMapClient implements ClientModInitializer {
     private static String biomeLabel = "";
     private static long biomeRefreshAt;
     static int miniOpacity = 100;
+    // Pixel-art grid in world blocks. Larger steps produce crisp, larger
+    // squares on both the circular minimap and the fullscreen map.
+    static int mapPixelSize = 2;
     static boolean caveMode;
     static boolean caveScreenActive() {
         return caveMode && Minecraft.getInstance().screen instanceof MapScreen;
@@ -81,6 +84,8 @@ public final class RoundMapClient implements ClientModInitializer {
             if (!Double.isFinite(miniZoom)) miniZoom = 1.0;
             miniZoom = Math.max(1.0, Math.min(4.0, miniZoom));
             miniSize = Math.max(24, Math.min(120, miniSize));
+            mapPixelSize = Math.max(1, Math.min(4,
+                Integer.parseInt(p.getProperty("pixelSize", "2"))));
             showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
             showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
             showBiome = Boolean.parseBoolean(p.getProperty("biome", "true"));
@@ -123,6 +128,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("x", Double.toString(miniX));
         p.setProperty("y", Double.toString(miniY));
         p.setProperty("size", Integer.toString(miniSize));
+        p.setProperty("pixelSize", Integer.toString(mapPixelSize));
         p.setProperty("zoom", Double.toString(miniZoom));
         p.setProperty("visible", Boolean.toString(showMini));
         p.setProperty("coords", Boolean.toString(showCoords));
@@ -977,6 +983,12 @@ public final class RoundMapClient implements ClientModInitializer {
                 option(left, top + step * 2, cw,
                     "Стрелка: " + ARROW_COLOR_NAMES[arrowColorIndex], () -> {
                     arrowColorIndex = (arrowColorIndex + 1) % ARROW_COLORS.length;
+                    savePosition();
+                });
+                option(right, top + step * 2, cw,
+                    "Пикселизация: " + mapPixelSize + "×" + mapPixelSize, () -> {
+                    mapPixelSize = mapPixelSize == 4 ? 1 : mapPixelSize + 1;
+                    RoundMapTextures.invalidate();
                     savePosition();
                 });
             }
