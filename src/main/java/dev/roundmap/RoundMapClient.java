@@ -470,9 +470,9 @@ public final class RoundMapClient implements ClientModInitializer {
      */
     private static void drawWorldMarkers(GuiGraphics g, Minecraft mc) {
         net.minecraft.client.Camera camera = mc.gameRenderer.getMainCamera();
-        net.minecraft.world.phys.Vec3 eye = camera.getPosition();
-        double yaw = Math.toRadians(camera.getYRot());
-        double pitch = Math.toRadians(camera.getXRot());
+        net.minecraft.world.phys.Vec3 eye = camera.position();
+        double yaw = Math.toRadians(camera.yRot());
+        double pitch = Math.toRadians(camera.xRot());
         double cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
         // Minecraft yaw = 0 faces +Z, positive pitch looks down.
         double horizontalX = -Math.sin(yaw), horizontalZ = Math.cos(yaw);
