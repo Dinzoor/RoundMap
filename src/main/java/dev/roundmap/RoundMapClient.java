@@ -857,9 +857,20 @@ public final class RoundMapClient implements ClientModInitializer {
                         "X: " + clickedX + ", Y: " + clickedY + ", Z: " + clickedZ);
                     contextOpen = false; rebuild();
                 }).bounds(x, top + 94, 190, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Пересканировать область"), b -> {
+                    RoundMapAtlas.rescanRegion(clickedX, clickedZ, 4);
+                    contextOpen = false;
+                    rebuild();
+                }).bounds(x, top + 117, 190, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Копировать диагностику"), b -> {
+                    String report = RoundMapAtlas.diagnostics(minecraft, clickedX, clickedZ);
+                    GLFW.glfwSetClipboardString(minecraft.getWindow().handle(), report);
+                    contextOpen = false;
+                    rebuild();
+                }).bounds(x, top + 140, 190, 20).build());
                 addRenderableWidget(Button.builder(Component.literal("Закрыть"), b -> {
                     contextOpen = false; rebuild();
-                }).bounds(x, top + 117, 190, 20).build());
+                }).bounds(x, top + 163, 190, 20).build());
             }
         }
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
@@ -912,7 +923,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 Math.max(0, width - 210), height - 17, 0xFFFFFFFF);
             if (contextOpen) {
                 g.fill(contextX - 3, contextY - 4,
-                    contextX + 193, contextY + 142, 0xED10181F);
+                    contextX + 193, contextY + 188, 0xED10181F);
                 g.drawString(font, clickedX + ", " + clickedY + ", " +
                     clickedZ + "  •  ПКМ", contextX + 5, contextY + 7, 0xFFCBD5DF);
             }
@@ -922,7 +933,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 && mouseX < width - 38) {
                 contextOpen = true;
                 contextX = Math.max(4, Math.min(width - 198, mouseX));
-                contextY = Math.max(40, Math.min(height - 169, mouseY));
+                contextY = Math.max(40, Math.min(height - 215, mouseY));
                 clickedX = hoveredX; clickedY = hoveredY; clickedZ = hoveredZ;
                 rebuild();
             }
