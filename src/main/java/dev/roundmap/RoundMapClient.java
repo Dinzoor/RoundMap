@@ -84,8 +84,15 @@ public final class RoundMapClient implements ClientModInitializer {
             worldMarkerDistance = Math.max(64, Math.min(5000, Integer.parseInt(p.getProperty("worldMarkerDistance", "1500"))));
             brightFog = Boolean.parseBoolean(p.getProperty("brightFog", "true"));
             RoundMapFog.softEdges = Boolean.parseBoolean(p.getProperty("softFog", "true"));
-            RoundMapAtlas.readsPerTick = Math.max(2, Math.min(16, Integer.parseInt(p.getProperty("scanBudget", "8"))));
-            RoundMapAtlas.detailed = Boolean.parseBoolean(p.getProperty("detailed", "true"));
+            int oldBudget = Integer.parseInt(p.getProperty("scanBudget", "128"));
+            RoundMapAtlas.readsPerTick = Math.max(32, Math.min(256, oldBudget));
+            // Earlier alpha saves capped sampling to 2-16 reads/tick, which
+            // made large maps take minutes to appear. Migrate once.
+            if (!p.getProperty("samplingFormat", "0").equals("2")) {
+                RoundMapAtlas.readsPerTick = 128;
+            }
+            RoundMapAtlas.detailed = p.getProperty("samplingFormat", "0").equals("2")
+                ? Boolean.parseBoolean(p.getProperty("detailed", "true")) : true;
             RoundMapAtlas.contours = Boolean.parseBoolean(p.getProperty("contours", "true"));
             RoundMapAtlas.relief = Boolean.parseBoolean(p.getProperty("relief", "true"));
             RoundMapRadar.players = Boolean.parseBoolean(p.getProperty("radarPlayers", "true"));
@@ -116,6 +123,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("brightFog", Boolean.toString(brightFog));
         p.setProperty("softFog", Boolean.toString(RoundMapFog.softEdges));
         p.setProperty("scanBudget", Integer.toString(RoundMapAtlas.readsPerTick));
+        p.setProperty("samplingFormat", "2");
         p.setProperty("detailed", Boolean.toString(RoundMapAtlas.detailed));
         p.setProperty("contours", Boolean.toString(RoundMapAtlas.contours));
         p.setProperty("relief", Boolean.toString(RoundMapAtlas.relief));
@@ -628,8 +636,9 @@ public final class RoundMapClient implements ClientModInitializer {
                 option(left, top, cw, "Качество: " + (RoundMapAtlas.detailed ? "Детально" : "Быстро"),
                     () -> { RoundMapAtlas.detailed = !RoundMapAtlas.detailed; RoundMapAtlas.forceRefresh(); savePosition(); });
                 option(left, top + step, cw, "Сканирование: " + RoundMapAtlas.readsPerTick + " / тик",
-                    () -> { RoundMapAtlas.readsPerTick = RoundMapAtlas.readsPerTick >= 16 ? 2 :
-                        RoundMapAtlas.readsPerTick == 2 ? 4 : RoundMapAtlas.readsPerTick == 4 ? 8 : 16;
+                    () -> { RoundMapAtlas.readsPerTick = RoundMapAtlas.readsPerTick >= 256 ? 32 :
+                        RoundMapAtlas.readsPerTick < 64 ? 64 :
+                        RoundMapAtlas.readsPerTick < 128 ? 128 : 256;
                         savePosition(); });
             }
             addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
