@@ -125,6 +125,16 @@ final class RoundMapAtlas {
         return r >= 175 && g <= 24 && b <= 24 && Math.abs(g - b) <= 10;
     }
 
+    // Alpha.17 stored biome-tinted fake green (#627B65) whenever the
+    // real server block texture could not be read. Like the old gray,
+    // it was baked into the atlas even though the world is not green.
+    private static boolean legacySyntheticGreen(int color) {
+        int r = (color >>> 16) & 255;
+        int g = (color >>> 8) & 255;
+        int b = color & 255;
+        return r >= 69 && r <= 144 && g == r + 25 && b == r + 3;
+    }
+
     // Alpha.16 saved this artificial gray (#81868D) to the atlas.
     // The altitude brightness offset shifts all three channels equally,
     // so check their exact spacing rather than natural grayscale colors.
@@ -276,7 +286,8 @@ final class RoundMapAtlas {
                         else if (version == LEGACY_MAGIC)
                             stage = stage > 0 ? 2 : 0;
                         boolean invalid = false;
-                        int legacyGrayPixels = 0, oldRedPixels = 0;
+                        int legacyGrayPixels = 0, syntheticGreenPixels = 0,
+                            oldRedPixels = 0;
                         for (int p = 0; p < 256; p++) {
                             if (invalidFallback(colors[p])) {
                                 colors[p] = 0;
@@ -284,6 +295,7 @@ final class RoundMapAtlas {
                                 invalid = true;
                             } else {
                                 if (legacyGray(colors[p])) legacyGrayPixels++;
+                                if (legacySyntheticGreen(colors[p])) syntheticGreenPixels++;
                                 if (invalidRed(colors[p])) oldRedPixels++;
                             }
                         }
@@ -291,7 +303,8 @@ final class RoundMapAtlas {
                         // flat gray. Keep the old explored data visible while
                         // the player is away, but schedule a full 16x16
                         // re-sample when the chunk returns to view.
-                        if (legacyGrayPixels >= 64 || oldRedPixels >= 192)
+                        if (legacyGrayPixels >= 64 ||
+                            syntheticGreenPixels >= 64 || oldRedPixels >= 192)
                             stage = Math.min(stage, 2);
                         // Alpha.15 may have saved zeros in a fully explored
                         // tile. Re-scan those rather than losing the chunk.
@@ -438,21 +451,14 @@ final class RoundMapAtlas {
                 if (replacement == 0 && mapColor != MapColor.NONE &&
                     !invalidRed(mapColor.col))
                     replacement = mapColor.col | 0xFF000000;
-                // A biome-derived color is a last-resort approximation,
-                // not a fake stored "mapped block". It is deliberately
-                // nonuniform so missing textures cannot produce a flat sea.
+                // No invented biome-green cover-up: it made the purple
+                // custom floors look like a green field. If no model texture
+                // exists, use this block's actual map color (even when
+                // strongly red). On client-only display entities this can
+                // still differ from the geometry seen in the world.
                 if (replacement == 0) {
-                    String biomeName = mc.level.getBiome(ground).unwrapKey()
-                        .map(k -> k.identifier().getPath()).orElse("");
-                    int noise = (x * 73428767 ^ z * 912931) >>> 29;
-                    int base = biomeName.contains("desert") ||
-                        biomeName.contains("badlands") ? 0xFFAF956A :
-                        biomeName.contains("snow") || biomeName.contains("frozen")
-                            ? 0xFFB8C6CD : 0xFF627B65;
-                    replacement = 0xFF000000 |
-                        (Math.min(255, ((base >>> 16) & 255) + noise * 2) << 16) |
-                        (Math.min(255, ((base >>> 8) & 255) + noise * 2) << 8) |
-                        Math.min(255, (base & 255) + noise * 2);
+                    replacement = mapColor == MapColor.NONE ? color :
+                        (mapColor.col | 0xFF000000);
                 }
                 color = replacement;
             }
