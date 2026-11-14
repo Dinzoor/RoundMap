@@ -20,6 +20,7 @@ import java.util.zip.GZIPOutputStream;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.MapColor;
@@ -30,15 +31,19 @@ import net.minecraft.world.level.material.MapColor;
  * Disk compression runs on one daemon worker without touching Minecraft levels.
  */
 final class RoundMapAtlas {
-    private static final int MAGIC = 0x524D4134; // RMA4: preview, medium and full
-    private static final int OLD_MAGIC = 0x524D4133; // RMA3: medium and full
-    private static final int LEGACY_MAGIC = 0x524D4132; // RMA2: no height data
+    private static final int MAGIC = 0x524D4135; // RMA5: color, height and light
+    private static final int OLD_MAGIC = 0x524D4134; // RMA4: no light
+    private static final int PREVIEW_MAGIC = 0x524D4133; // RMA3: 2 stages
+    private static final int LEGACY_MAGIC = 0x524D4132; // RMA2: no height
     // Survey only chunks actually within the player's configured view distance.
     private static final int MAX_VISIBLE_RADIUS = 12;
     static int readsPerTick = 96;
     static boolean detailed = true;
     static boolean contours = true;
     static boolean relief = true;
+    static boolean lighting = true;
+    static int timeMode = 0; // 0 world time, 1 forced day, 2 forced night
+    private static boolean nightActive;
     private static final long SAVE_EVERY_NANOS = 60_000_000_000L;
     private static final ExecutorService IO = Executors.newSingleThreadExecutor(task -> {
         Thread t = new Thread(task, "RoundMap-atlas-io");
@@ -66,13 +71,15 @@ final class RoundMapAtlas {
     private static final class Tile {
         final int[] pixels = new int[256];
         final short[] heights = new short[256];
+        final byte[] lights = new byte[256];
         int stage; // 0 unknown, 1 preview, 2 medium 4x4, 3 full 16x16
         Tile() { Arrays.fill(heights, Short.MIN_VALUE); }
-        Tile(int stage, int[] colors, short[] h) {
+        Tile(int stage, int[] colors, short[] h, byte[] light) {
             this();
             this.stage = stage;
             System.arraycopy(colors, 0, pixels, 0, Math.min(256, colors.length));
             if (h != null) System.arraycopy(h, 0, heights, 0, Math.min(256, h.length));
+            if (light != null) System.arraycopy(light, 0, lights, 0, Math.min(256, light.length));
         }
     }
 
@@ -125,6 +132,12 @@ final class RoundMapAtlas {
         return invalidFallback(color) ? 0 : color;
     }
 
+    static int lightAt(int x, int z) {
+        Tile tile = tiles.get(key(x >> 4, z >> 4));
+        if (tile == null) return 0;
+        return tile.lights[((z & 15) << 4) | (x & 15)] & 255;
+    }
+
     static int heightAt(int x, int z) {
         Tile t = tiles.get(key(x >> 4, z >> 4));
         if (t == null) return Short.MIN_VALUE;
@@ -160,6 +173,13 @@ final class RoundMapAtlas {
         int red = Math.max(0, Math.min(255, ((color >> 16) & 255) + shade));
         int green = Math.max(0, Math.min(255, ((color >> 8) & 255) + shade));
         int blue = Math.max(0, Math.min(255, (color & 255) + shade));
+        if (lighting && nightActive) {
+            int blockLight = Math.min(15, lightAt(x, z));
+            double brightness = Math.min(1.0, .28 + blockLight * .054);
+            red = (int)Math.min(255, red * brightness + blockLight * 1.65);
+            green = (int)Math.min(255, green * brightness + blockLight * 1.0);
+            blue = (int)Math.min(255, blue * brightness + blockLight * .35);
+        }
         return 0xFF000000 | red << 16 | green << 8 | blue;
     }
 
@@ -197,7 +217,8 @@ final class RoundMapAtlas {
             if (Files.isRegularFile(source)) {
                 try (DataInputStream in = new DataInputStream(new GZIPInputStream(Files.newInputStream(source)))) {
                     int version = in.readInt();
-                    if (version != MAGIC && version != OLD_MAGIC && version != LEGACY_MAGIC) return;
+                    if (version != MAGIC && version != OLD_MAGIC
+                        && version != PREVIEW_MAGIC && version != LEGACY_MAGIC) return;
                     int count = in.readInt();
                     if (count < 0 || count > 40000) return;
                     for (int i = 0; i < count; i++) {
@@ -206,18 +227,18 @@ final class RoundMapAtlas {
                         int[] colors = new int[256];
                         for (int p = 0; p < 256; p++) colors[p] = in.readInt();
                         short[] heights = null;
-                        if (version == MAGIC || version == OLD_MAGIC) {
+                        short[] heights = null;
+                        if (version == MAGIC || version == OLD_MAGIC
+                            || version == PREVIEW_MAGIC) {
                             heights = new short[256];
                             for (int p = 0; p < 256; p++) heights[p] = in.readShort();
                         }
-                        if (version == OLD_MAGIC) {
-                            // Old stage 1 already contained 4x4 data;
-                            // old stage 2 already contained 16x16 detail.
+                        byte[] lights = new byte[256];
+                        if (version == MAGIC) in.readFully(lights);
+                        if (version == PREVIEW_MAGIC)
                             stage = stage == 1 ? 2 : stage == 2 ? 3 : stage;
-                        } else if (version == LEGACY_MAGIC) {
-                            // Heightless files always need refinement.
+                        else if (version == LEGACY_MAGIC)
                             stage = stage > 0 ? 2 : 0;
-                        }
                         boolean invalid = false;
                         for (int p = 0; p < 256; p++) {
                             if (invalidFallback(colors[p])) {
@@ -229,7 +250,7 @@ final class RoundMapAtlas {
                         if (invalid) {
                             stage = 0; // Re-explore those chunks on the next visit.
                         }
-                        loaded.put(k, new Tile(stage, colors, heights));
+                        loaded.put(k, new Tile(stage, colors, heights, lights));
                     }
                 } catch (IOException e) {
                     System.err.println("[RoundMap] Unable to load explored terrain: " + e);
@@ -252,6 +273,13 @@ final class RoundMapAtlas {
     static void tick(Minecraft mc) {
         switchWorld(mc);
         if (mc.level == null || mc.player == null) return;
+        long dayTicks = Math.floorMod(mc.level.getDayTime(), 24000L);
+        boolean night = timeMode == 2 || (timeMode == 0
+            && dayTicks >= 12500L && dayTicks <= 23000L);
+        if (night != nightActive) {
+            nightActive = night;
+            RoundMapTextures.invalidate();
+        }
         int cx = mc.player.getBlockX() >> 4, cz = mc.player.getBlockZ() >> 4;
         // The client may know about distant chunks, but exploring them before
         // they enter the player's visible/rendered range reveals too much map.
@@ -372,9 +400,12 @@ final class RoundMapAtlas {
             color = 0xFF000000 | (r << 16) | (g << 8) | b;
             short altitude = (short)Math.max(Short.MIN_VALUE + 1,
                 Math.min(Short.MAX_VALUE, ground.getY()));
+            byte light = (byte)Math.max(0, Math.min(15,
+                mc.level.getBrightness(LightLayer.BLOCK, ground.above())));
             if (activeStep == 16) {
                 Arrays.fill(tile.pixels, color);
                 Arrays.fill(tile.heights, altitude);
+                Arrays.fill(tile.lights, light);
             } else if (activeStep == 4) {
                 int baseX = localX - 2, baseZ = localZ - 2;
                 for (int dz = 0; dz < 4; dz++)
@@ -382,11 +413,13 @@ final class RoundMapAtlas {
                         int cell = ((baseZ + dz) << 4) | baseX + dx;
                         tile.pixels[cell] = color;
                         tile.heights[cell] = altitude;
+                        tile.lights[cell] = light;
                     }
             } else {
                 int cell = (localZ << 4) | localX;
                 tile.pixels[cell] = color;
                 tile.heights[cell] = altitude;
+                tile.lights[cell] = light;
             }
             activeIndex++;
             budget--;
@@ -470,7 +503,8 @@ final class RoundMapAtlas {
         Map<Long, Tile> snapshot = new HashMap<>();
         for (Map.Entry<Long, Tile> e : tiles.entrySet()) {
             if (e.getValue().stage > 0) snapshot.put(e.getKey(),
-                new Tile(e.getValue().stage, e.getValue().pixels, e.getValue().heights));
+                new Tile(e.getValue().stage, e.getValue().pixels,
+                    e.getValue().heights, e.getValue().lights));
         }
         IO.submit(() -> {
             try {
@@ -484,6 +518,7 @@ final class RoundMapAtlas {
                         out.writeByte(e.getValue().stage);
                         for (int pixel : e.getValue().pixels) out.writeInt(pixel);
                         for (short height : e.getValue().heights) out.writeShort(height);
+                        out.write(e.getValue().lights);
                     }
                 }
                 Files.move(temp, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
