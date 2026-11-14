@@ -694,6 +694,11 @@ public final class RoundMapClient implements ClientModInitializer {
 
     private static final class MapScreen extends Screen {
         private double panX, panZ, oldX, oldY;
+        // The texture is rescaled continuously while a new zoom level is
+        // being baked in the background; wheel input never jumps instantly.
+        private double visualZoom = mapZoom, targetZoom = mapZoom;
+        private double zoomAnchorX, zoomAnchorY;
+        private long zoomFrameAt;
         private boolean wasDragging, wasRight, lastPlus, lastMinus;
         private boolean contextOpen;
         private int contextX, contextY, clickedX, clickedY, clickedZ;
@@ -707,13 +712,39 @@ public final class RoundMapClient implements ClientModInitializer {
         private MapScreen(int x, int z, int zoom) {
             this();
             mapZoom = Math.max(1, Math.min(10, zoom));
+            visualZoom = targetZoom = mapZoom;
             Minecraft mc = Minecraft.getInstance();
             if (mc.player != null) {
                 panX = x - mc.player.getBlockX();
                 panZ = z - mc.player.getBlockZ();
             }
         }
-        private void zoom(int amount) { mapZoom = Math.max(1, Math.min(10, mapZoom + amount)); }
+        private void zoom(double steps, double mouseX, double mouseY) {
+            if (steps == 0) return;
+            targetZoom = Math.max(0.65, Math.min(16.0,
+                targetZoom * Math.pow(1.27, steps)));
+            mapZoom = Math.max(1, Math.min(10, (int)Math.round(targetZoom)));
+            zoomAnchorX = mouseX - width / 2.0;
+            zoomAnchorY = mouseY - height / 2.0;
+        }
+
+        private void updateSmoothZoom() {
+            long now = System.nanoTime();
+            double elapsed = zoomFrameAt == 0 ? 1.0 / 60.0 :
+                Math.max(0.001, Math.min(0.10, (now - zoomFrameAt) / 1_000_000_000.0));
+            zoomFrameAt = now;
+            if (Math.abs(targetZoom - visualZoom) < 0.0005) {
+                visualZoom = targetZoom;
+                return;
+            }
+            double previous = visualZoom;
+            visualZoom += (targetZoom - visualZoom) *
+                (1.0 - Math.exp(-elapsed * 16.0));
+            // Keep the block under the mouse in exactly the same on-screen
+            // location through the animation, like a modern map viewer.
+            panX += zoomAnchorX * (1.0 / previous - 1.0 / visualZoom);
+            panZ += zoomAnchorY * (1.0 / previous - 1.0 / visualZoom);
+        }
         private void rebuild() {
             clearWidgets();
             init();
@@ -742,9 +773,9 @@ public final class RoundMapClient implements ClientModInitializer {
                 minecraft.setScreen(new OptionsScreen(this)))
                 .bounds(width - 113, y, 106, 20).build());
             int rx = width - 31, cy = height / 2;
-            addRenderableWidget(Button.builder(Component.literal("+"), b -> zoom(1))
+            addRenderableWidget(Button.builder(Component.literal("+"), b -> zoom(1.0, width / 2.0, height / 2.0))
                 .bounds(rx, cy - 55, 24, 24).build());
-            addRenderableWidget(Button.builder(Component.literal("-"), b -> zoom(-1))
+            addRenderableWidget(Button.builder(Component.literal("-"), b -> zoom(-1.0, width / 2.0, height / 2.0))
                 .bounds(rx, cy - 25, 24, 24).build());
             addRenderableWidget(Button.builder(Component.literal("C"), b -> {
                 panX = 0; panZ = 0;
@@ -784,26 +815,29 @@ public final class RoundMapClient implements ClientModInitializer {
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
             Minecraft mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) return;
+            updateSmoothZoom();
             long handle = mc.getWindow().handle();
             boolean dragging = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
             if (dragging && wasDragging && oldY > 35 && mouseY > 35 && mouseX < width - 38) {
-                panX -= (mouseX - oldX) / (double)mapZoom;
-                panZ -= (mouseY - oldY) / (double)mapZoom;
+                panX -= (mouseX - oldX) / visualZoom;
+                panZ -= (mouseY - oldY) / visualZoom;
             }
             wasDragging = dragging;
             oldX = mouseX; oldY = mouseY;
             // Keep fractional pan positions for pixel-by-pixel smooth movement.
             double targetX = mc.player.getBlockX() + panX;
             double targetZ = mc.player.getBlockZ() + panZ;
-            RoundMapTextures.fullscreen(g, width, height, targetX, targetZ, mapZoom, dragging);
+            boolean zooming = Math.abs(targetZoom - visualZoom) > 0.01;
+            RoundMapTextures.fullscreen(g, width, height, targetX, targetZ,
+                visualZoom, dragging, zooming);
             int cx = width / 2, cy = height / 2;
             RoundMapRadar.draw(g, mc, cx, cy,
                 (int)Math.round(targetX), (int)Math.round(targetZ),
-                mapZoom, width / 2, height / 2, false);
-            drawMarkers(g, mc, cx, cy, mapZoom, Math.max(width, height) / 2,
+                (float)visualZoom, width / 2, height / 2, false);
+            drawMarkers(g, mc, cx, cy, (float)visualZoom, Math.max(width, height) / 2,
                 false, targetX, targetZ);
-            int playerX = cx + (int)Math.round((mc.player.getBlockX() - targetX) * mapZoom);
-            int playerZ = cy + (int)Math.round((mc.player.getBlockZ() - targetZ) * mapZoom);
+            int playerX = cx + (int)Math.round((mc.player.getBlockX() - targetX) * visualZoom);
+            int playerZ = cy + (int)Math.round((mc.player.getBlockZ() - targetZ) * visualZoom);
             if (playerX >= 12 && playerX < width - 12 &&
                 playerZ >= 47 && playerZ < height - 37)
                 playerArrow(g, mc, playerX, playerZ);
@@ -815,8 +849,8 @@ public final class RoundMapClient implements ClientModInitializer {
                   "  •  подробно: " + RoundMapAtlas.detailedChunks();
             g.drawString(font, count, 197, 12, 0xFFFFFFFF);
             g.fill(0, height - 25, width, height, 0xB018222C);
-            int hoveredX = (int)Math.round(targetX + (mouseX - cx) / (double)mapZoom);
-            int hoveredZ = (int)Math.round(targetZ + (mouseY - cy) / (double)mapZoom);
+            int hoveredX = (int)Math.round(targetX + (mouseX - cx) / visualZoom);
+            int hoveredZ = (int)Math.round(targetZ + (mouseY - cy) / visualZoom);
             int hoveredY = RoundMapAtlas.heightAt(hoveredX, hoveredZ);
             if (hoveredY == Short.MIN_VALUE) hoveredY = mc.player.getBlockY();
             g.drawString(font, "ЛКМ: сдвиг   Колесо: масштаб   ПКМ: меню   M: закрыть",
@@ -845,8 +879,8 @@ public final class RoundMapClient implements ClientModInitializer {
             wasRight = right;
             boolean plus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_EQUAL) == GLFW.GLFW_PRESS;
             boolean minus = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_MINUS) == GLFW.GLFW_PRESS;
-            if (plus && !lastPlus) zoom(1);
-            if (minus && !lastMinus) zoom(-1);
+            if (plus && !lastPlus) zoom(1.0, width / 2.0, height / 2.0);
+            if (minus && !lastMinus) zoom(-1.0, width / 2.0, height / 2.0);
             lastPlus = plus; lastMinus = minus;
         }
         @Override public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
@@ -854,8 +888,7 @@ public final class RoundMapClient implements ClientModInitializer {
             return super.keyPressed(event);
         }
         @Override public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
-            if (vertical > 0) zoom(1);
-            if (vertical < 0) zoom(-1);
+            zoom(vertical, mouseX, mouseY);
             return true;
         }
     }
