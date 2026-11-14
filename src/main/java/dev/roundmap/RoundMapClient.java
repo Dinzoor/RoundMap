@@ -476,7 +476,10 @@ public final class RoundMapClient implements ClientModInitializer {
         double cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
         // Minecraft yaw = 0 faces +Z, positive pitch looks down.
         double horizontalX = -Math.sin(yaw), horizontalZ = Math.cos(yaw);
-        double rightX = horizontalZ, rightZ = -horizontalX;
+        // Minecraft faces south (+Z) at yaw 0: screen-right points WEST
+        // (-X), not east. The previous sign mirrored waypoint positions,
+        // making stationary pins appear attached to the wrong terrain.
+        double rightX = -horizontalZ, rightZ = horizontalX;
         double forwardX = horizontalX * cosPitch;
         double forwardY = -sinPitch;
         double forwardZ = horizontalZ * cosPitch;
