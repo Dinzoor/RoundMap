@@ -162,13 +162,24 @@ final class RoundMapAtlas {
         if (h == Short.MIN_VALUE) return color;
         int west = heightAt(x - 1, z);
         int north = heightAt(x, z - 1);
+        int east = heightAt(x + 1, z);
+        int south = heightAt(x, z + 1);
         if (west == Short.MIN_VALUE) west = h;
         if (north == Short.MIN_VALUE) north = h;
-        int shade = relief ? Math.max(-62, Math.min(62,
-            (h - west) * 7 + (h - north) * 5)) : 0;
+        if (east == Short.MIN_VALUE) east = h;
+        if (south == Short.MIN_VALUE) south = h;
+        // Four-sided height gradients keep fine cliffs, ridges and river
+        // banks visible after zooming in. Uses the existing height atlas,
+        // never reads Minecraft blocks from the render loop.
+        int directional = (west - east) * 4 + (north - south) * 3;
+        int ledge = (h - west) * 3 + (h - north) * 2;
+        int shade = relief ? Math.max(-70, Math.min(70,
+            directional + ledge)) : 0;
         if (contours && (Math.floorDiv(h, 10) != Math.floorDiv(west, 10) ||
-                         Math.floorDiv(h, 10) != Math.floorDiv(north, 10))) {
-            shade = Math.max(-80, shade - 24);
+                         Math.floorDiv(h, 10) != Math.floorDiv(north, 10) ||
+                         Math.floorDiv(h, 10) != Math.floorDiv(east, 10) ||
+                         Math.floorDiv(h, 10) != Math.floorDiv(south, 10))) {
+            shade = Math.max(-80, shade - 19);
         }
         int red = Math.max(0, Math.min(255, ((color >> 16) & 255) + shade));
         int green = Math.max(0, Math.min(255, ((color >> 8) & 255) + shade));
