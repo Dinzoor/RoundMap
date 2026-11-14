@@ -51,6 +51,9 @@ final class RoundMapAtlas {
         return t;
     });
     private static final Map<Long, Tile> tiles = new HashMap<>();
+    // Force a single repair scan per red-dominated tile in this session.
+    // The old atlas is preserved while updated terrain samples arrive.
+    private static final java.util.Set<Long> redRepairAttempted = new java.util.HashSet<>();
     private static final ArrayDeque<Long> nearbyCoarse = new ArrayDeque<>();
     private static final ArrayDeque<Long> nearbyMedium = new ArrayDeque<>();
     private static final ArrayDeque<Long> coarseQueue = new ArrayDeque<>();
@@ -137,7 +140,7 @@ final class RoundMapAtlas {
         }
         BlockState state = mc.level.getBlockState(surface);
         return "RoundMap X=" + x + " Y=" + surface.getY() + " Z=" + z +
-            " top=" + topState + " skipped=" + (top.getY() - surface.getY()) +
+            " top=" + topState + " skipped_or_air=" + (top.getY() - surface.getY()) +
             " stage=" + stage + " cache=#" +
             String.format("%06X", stored & 0xFFFFFF) + " " +
             RoundMapBlockPalette.diagnose(mc, state, surface);
@@ -210,17 +213,28 @@ final class RoundMapAtlas {
     }
 
     private static BlockPos actualSurface(Minecraft mc, BlockPos at) {
-        BlockPos ground = mc.level.getHeightmapPos(
+        BlockPos top = mc.level.getHeightmapPos(
             Heightmap.Types.WORLD_SURFACE, at).below();
-        // Usually one or two barriers. The bounded search also handles
-        // multi-layer server protection while keeping sampling inexpensive.
-        for (int depth = 0; depth < 48; depth++) {
+        BlockPos ground = top;
+        boolean passedTechnicalLayer = false;
+        // A barrier roof often FLOATS above empty air on custom servers.
+        // The old scanner stopped immediately after the barrier because
+        // the next block was AIR, so nothing was redrawn and red cache tiles
+        // remained indefinitely. Descend through air only after a technical
+        // layer, then choose the real terrain below.
+        for (int depth = 0; depth < 128 &&
+             ground.getY() >= mc.level.getMinY(); depth++) {
             BlockState state = mc.level.getBlockState(ground);
-            if (!invisibleTechnicalBlock(state)) return ground;
-            if (ground.getY() <= mc.level.getMinY()) return null;
+            if (invisibleTechnicalBlock(state)) {
+                passedTechnicalLayer = true;
+            } else if (state.isAir()) {
+                if (!passedTechnicalLayer) return ground;
+            } else {
+                return ground;
+            }
             ground = ground.below();
         }
-        // A 48+ block deep invisible structure is not a known surface.
+        // No solid world surface within the downward scan limit.
         return null;
     }
 
@@ -302,6 +316,7 @@ final class RoundMapAtlas {
         if (world == mc.level && worldKey.equals(currentWorldKey)) return;
         saveAsync();
         tiles.clear();
+        redRepairAttempted.clear();
         nearbyCoarse.clear();
         nearbyMedium.clear();
         coarseQueue.clear();
@@ -635,6 +650,15 @@ final class RoundMapAtlas {
         return false;
     }
 
+    private static boolean redDominated(Tile tile) {
+        if (tile == null || tile.stage < 1) return false;
+        int reds = 0;
+        for (int c : tile.pixels) {
+            if (invalidRed(c) && ++reds >= 128) return true;
+        }
+        return false;
+    }
+
     private static void rebuildQueues(int centerX, int centerZ, int viewRadius) {
         nearbyCoarse.clear();
         nearbyMedium.clear();
@@ -654,6 +678,14 @@ final class RoundMapAtlas {
                     if (dx * dx + dz * dz > outer * outer) continue;
                     long k = key(centerX + dx, centerZ + dz);
                     Tile tile = tiles.get(k);
+                    // Migrate the saved red area without needing to reopen
+                    // the world or manually erase caches. Only loaded/viewed
+                    // chunks are scheduled; a one-shot guard avoids loops if
+                    // an actual red material exists at this location.
+                    if (tile != null && redDominated(tile)
+                        && redRepairAttempted.add(k)) {
+                        tile.stage = Math.min(tile.stage, 2);
+                    }
                     int stage = tile == null ? 0 : tile.stage;
                     if (stage == 0)
                         (radius <= 2 ? nearbyCoarse : coarseQueue).addLast(k);
