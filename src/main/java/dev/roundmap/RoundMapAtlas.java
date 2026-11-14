@@ -529,10 +529,12 @@ final class RoundMapAtlas {
                 stage = 1; next = nearbyCoarse.pollFirst();
             } else if (!nearbyMedium.isEmpty()) {
                 stage = 2; next = nearbyMedium.pollFirst();
+            } else if (!nearbyFine.isEmpty()) {
+                // Repair gray/incorrect terrain directly under the player
+                // before surveying distant low-resolution chunk previews.
+                stage = 3; next = nearbyFine.pollFirst();
             } else if (!coarseQueue.isEmpty()) {
                 stage = 1; next = coarseQueue.pollFirst();
-            } else if (!nearbyFine.isEmpty()) {
-                stage = 3; next = nearbyFine.pollFirst();
             } else if (!mediumQueue.isEmpty()) {
                 stage = 2; next = mediumQueue.pollFirst();
             } else {
