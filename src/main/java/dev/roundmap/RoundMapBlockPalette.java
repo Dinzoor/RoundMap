@@ -81,7 +81,7 @@ final class RoundMapBlockPalette {
         int bad = 0;
         for (int c : grid) {
             int r = (c >>> 16) & 255, g = (c >>> 8) & 255, b = c & 255;
-            if ((r > 230 && g < 35 && b < 35) ||
+            if ((r >= 180 && g <= 24 && b <= 24) ||
                 (r > 225 && b > 220 && g < 40)) bad++;
         }
         return bad >= 54; // At least 84% of samples are placeholder-like.
@@ -104,38 +104,58 @@ final class RoundMapBlockPalette {
             -z0*x1-z1*x2-z2*x3-z3*x0)*.5;
     }
 
+    private record TopCandidate(double height, double area) {}
+
+    private static void addTop(Map<Identifier, TopCandidate> tops, BakedQuad quad) {
+        Identifier name = quad.sprite().contents().name();
+        double area = topFaceArea(quad);
+        if (area <= .00001) return;
+        double height = (quad.position0().y() + quad.position1().y() +
+            quad.position2().y() + quad.position3().y()) / 4.0;
+        TopCandidate old = tops.get(name);
+        if (old == null || height > old.height() ||
+            (height == old.height() && area > old.area()))
+            tops.put(name, new TopCandidate(height, area));
+    }
+
     private static Identifier findSprite(Minecraft mc, BlockState state, BlockPos pos) {
         try {
             BlockStateModel model = mc.getBlockRenderer().getBlockModel(state);
             List<BlockModelPart> parts =
                 model.collectParts(RandomSource.create(state.getSeed(pos)));
-            Map<Identifier, Double> topAreas = new HashMap<>();
+            Map<Identifier, TopCandidate> topFaces = new HashMap<>();
             LinkedHashSet<Identifier> fallbackFaces = new LinkedHashSet<>();
             for (BlockModelPart part : parts) {
                 // CULLED UP quads are only one possible source of the
                 // visible top face. Most custom top faces are UNCULLED.
                 for (BakedQuad quad : part.getQuads(Direction.UP))
-                    topAreas.merge(quad.sprite().contents().name(),
-                        Math.max(.01, topFaceArea(quad)), Double::sum);
+                    addTop(topFaces, quad);
                 for (BakedQuad quad : part.getQuads(null)) {
                     Identifier sprite = quad.sprite().contents().name();
                     if (quad.direction() == Direction.UP)
-                        topAreas.merge(sprite,
-                            Math.max(.01, topFaceArea(quad)), Double::sum);
+                        addTop(topFaces, quad);
                     else fallbackFaces.add(sprite);
                 }
             }
             // Prefer large upward faces with loadable non-placeholder
             // textures; these match the textures players see from above.
             Identifier best = null;
-            double bestArea = -1;
-            for (Map.Entry<Identifier, Double> entry : topAreas.entrySet()) {
+            double bestHeight = -Double.MAX_VALUE, bestArea = -1.0;
+            for (Map.Entry<Identifier, TopCandidate> entry : topFaces.entrySet()) {
                 Identifier id = entry.getKey();
                 if (id.getPath().contains("missingno")) continue;
                 TextureSample sample = sampleFor(mc, id);
                 if (sample == null || suspiciousMissingSample(sample)) continue;
-                if (entry.getValue() > bestArea) {
-                    bestArea = entry.getValue();
+                // Topmost textured face wins; this is essential for
+                // resource-pack blocks with decorative overlays above
+                // the main cube. Size breaks ties among surfaces at the
+                // same height and keeps small details subordinate.
+                double height = entry.getValue().height();
+                double area = entry.getValue().area();
+                if (height > bestHeight + .001 ||
+                    (Math.abs(height - bestHeight) <= .001 && area > bestArea)) {
+                    bestHeight = height;
+                    bestArea = area;
                     best = id;
                 }
             }
@@ -151,6 +171,15 @@ final class RoundMapBlockPalette {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    static String diagnose(Minecraft mc, BlockState state, BlockPos pos) {
+        Identifier sprite = findSprite(mc, state, pos);
+        int base = state.getMapColor(mc.level, pos).col;
+        int result = color(mc, state, pos, base | 0xFF000000);
+        return "block=" + state + " model_texture=" + (sprite == null ? "none" : sprite) +
+            " mapColor=#" + String.format("%06X", base & 0xFFFFFF) +
+            " sample=#" + String.format("%06X", result & 0xFFFFFF);
     }
 
     private static TextureSample loadSample(Minecraft mc, Identifier spriteName) {
