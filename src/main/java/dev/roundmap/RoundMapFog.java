@@ -81,30 +81,79 @@ final class RoundMapFog {
     }
 
     /**
+     * Readable walls and corridors on the fullscreen map. A maze dead end
+     * should be bounded by visible wall edges, not lost in the wall texture.
+     * We use ONLY real cached surface heights; never guess a corridor from
+     * its color or draw walls across unexplored/fogged blocks.
+     *
+     * subX/subZ = -1 for a single-per-block map pixel. At close zoom the
+     * dark outline is drawn on just the relevant quarter-block edge.
+     */
+    private static int wallContrast(int x, int z, int subX, int subZ, int color) {
+        if (!RoundMapClient.wallContours || RoundMapClient.caveMode ||
+            RoundMapAtlas.colorAt(x, z) == 0) return color;
+        int center = RoundMapAtlas.heightAt(x, z);
+        if (center == Short.MIN_VALUE) return color;
+        int west = RoundMapAtlas.heightAt(x - 1, z);
+        int east = RoundMapAtlas.heightAt(x + 1, z);
+        int north = RoundMapAtlas.heightAt(x, z - 1);
+        int south = RoundMapAtlas.heightAt(x, z + 1);
+        // A known two-block-plus elevation change is a reliable indicator
+        // of a wall, ledge or corridor boundary. No imaginary path marking.
+        boolean w = west != Short.MIN_VALUE && west - center >= 2;
+        boolean e = east != Short.MIN_VALUE && east - center >= 2;
+        boolean n = north != Short.MIN_VALUE && north - center >= 2;
+        boolean so = south != Short.MIN_VALUE && south - center >= 2;
+        boolean edge = (w && (subX < 0 || subX == 0)) ||
+                       (e && (subX < 0 || subX == 3)) ||
+                       (n && (subZ < 0 || subZ == 0)) ||
+                       (so && (subZ < 0 || subZ == 3));
+        int delta = edge ? -91 : (w || e || n || so ? -14 : 0);
+        // Lightly define the top lip of the wall as well, producing a
+        // clear difference between its upper surface and a sunken path.
+        boolean upper = (west != Short.MIN_VALUE && center - west >= 2) ||
+                        (east != Short.MIN_VALUE && center - east >= 2) ||
+                        (north != Short.MIN_VALUE && center - north >= 2) ||
+                        (south != Short.MIN_VALUE && center - south >= 2);
+        if (!edge && upper) delta += 13;
+        if (delta == 0) return color;
+        int r = Math.max(0, Math.min(255, ((color >>> 16) & 255) + delta));
+        int g = Math.max(0, Math.min(255, ((color >>> 8) & 255) + delta));
+        int b = Math.max(0, Math.min(255, (color & 255) + delta));
+        return 0xFF000000 | r << 16 | g << 8 | b;
+    }
+
+    static int fullMapColor(int worldX, int worldZ) {
+        return wallContrast(worldX, worldZ, -1, -1,
+            color(worldX, worldZ));
+    }
+
+    /**
      * Close-up LOD: four-by-four texture details inside each saved block.
      * Fog/contours still use the existing atlas mask, so undiscovered land
      * never becomes visible just because a higher-resolution texture exists.
      */
     static int detailedColor(int x, int z, int subX, int subZ) {
         int sub = RoundMapAtlas.microColorAt(x, z, subX, subZ);
-        if (sub == 0) return color(x, z);
+        if (sub == 0) return fullMapColor(x, z);
         int base = RoundMapAtlas.colorAt(x, z);
-        if (base == 0) return color(x, z);
+        if (base == 0) return fullMapColor(x, z);
         if (softEdges && (
             RoundMapAtlas.colorAt(x - 7, z) == 0 ||
             RoundMapAtlas.colorAt(x + 7, z) == 0 ||
             RoundMapAtlas.colorAt(x, z - 7) == 0 ||
             RoundMapAtlas.colorAt(x, z + 7) == 0))
-            return color(x, z);
+            return fullMapColor(x, z);
         int shaded = RoundMapAtlas.shadedColorAt(x, z);
-        if (shaded == 0) return color(x, z);
+        if (shaded == 0) return fullMapColor(x, z);
         int red = Math.max(0, Math.min(255,
             ((shaded >> 16) & 255) + ((sub >> 16) & 255) - ((base >> 16) & 255)));
         int green = Math.max(0, Math.min(255,
             ((shaded >> 8) & 255) + ((sub >> 8) & 255) - ((base >> 8) & 255)));
         int blue = Math.max(0, Math.min(255,
             (shaded & 255) + (sub & 255) - (base & 255)));
-        return 0xFF000000 | red << 16 | green << 8 | blue;
+        return wallContrast(x, z, subX, subZ,
+            0xFF000000 | red << 16 | green << 8 | blue);
     }
 
     private RoundMapFog() {}
