@@ -460,7 +460,7 @@ public final class RoundMapClient implements ClientModInitializer {
             double dz = marker.z() + 0.5 - mc.player.getZ();
             double distance2d = Math.hypot(dx, dz);
             double distance = Math.hypot(distance2d, dy);
-            if (distance < 3 || distance > worldMarkerDistance) continue;
+            if (distance < 1.0 || distance > worldMarkerDistance) continue;
             double forward = dx * forwardX + dz * forwardZ;
             if (forward <= 0) continue;
             double side = dx * rightX + dz * rightZ;
