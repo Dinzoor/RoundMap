@@ -284,6 +284,7 @@ public final class RoundMapClient implements ClientModInitializer {
         listKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.roundmap.list", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             syncMarkers(client);
+            RoundMapMapViews.sync(client);
             RoundMapAtlas.tick(client);
             if (client.player == null || client.level == null || client.screen != null) return;
             if (mapKey.consumeClick()) client.setScreen(new MapScreen());
@@ -505,7 +506,11 @@ public final class RoundMapClient implements ClientModInitializer {
         // nearby rendered chunks can continue to appear on the atlas.
         @Override public boolean isPauseScreen() { return false; }
         private MapScreen(int x, int z) {
+            this(x, z, mapZoom);
+        }
+        private MapScreen(int x, int z, int zoom) {
             this();
+            mapZoom = Math.max(1, Math.min(10, zoom));
             Minecraft mc = Minecraft.getInstance();
             if (mc.player != null) {
                 panX = x - mc.player.getBlockX();
@@ -519,6 +524,9 @@ public final class RoundMapClient implements ClientModInitializer {
         }
         @Override protected void init() {
             int y = 8;
+            addRenderableWidget(Button.builder(Component.literal("Карты"), b ->
+                minecraft.setScreen(new MapLibraryScreen(this)))
+                .bounds(width - 322, y, 101, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Точки"), b ->
                 minecraft.setScreen(new WaypointListScreen(this, 0)))
                 .bounds(width - 215, y, 96, 20).build());
@@ -638,6 +646,83 @@ public final class RoundMapClient implements ClientModInitializer {
             if (vertical > 0) zoom(1);
             if (vertical < 0) zoom(-1);
             return true;
+        }
+    }
+
+    private static final class MapLibraryScreen extends Screen {
+        private final Screen parent;
+        private MapLibraryScreen(Screen parent) {
+            super(Component.literal("Карты"));
+            this.parent = parent;
+        }
+        @Override protected void init() {
+            int left = width / 2 - 176, y = 58;
+            addRenderableWidget(Button.builder(Component.literal("Основная — текущий мир"), b ->
+                minecraft.setScreen(new MapScreen())).bounds(left, y, 351, 20).build());
+            List<RoundMapMapViews.View> maps = RoundMapMapViews.all();
+            int max = Math.min(maps.size(), Math.max(1, (height - 160) / 29));
+            for (int i = 0; i < max; i++) {
+                RoundMapMapViews.View view = maps.get(i);
+                int row = y + 28 + i * 29;
+                addRenderableWidget(Button.builder(Component.literal(
+                    view.name() + " • X " + view.x() + " Z " + view.z()), b ->
+                    minecraft.setScreen(new MapScreen(view.x(), view.z(), view.zoom())))
+                    .bounds(left, row, 298, 21).build());
+                addRenderableWidget(Button.builder(Component.literal("X"), b -> {
+                    RoundMapMapViews.remove(view);
+                    minecraft.setScreen(new MapLibraryScreen(parent));
+                }).bounds(left + 305, row, 46, 21).build());
+            }
+            addRenderableWidget(Button.builder(Component.literal("Новая карта"), b ->
+                minecraft.setScreen(new MapViewNameScreen(this, parent)))
+                .bounds(width / 2 - 175, height - 61, 169, 22).build());
+            addRenderableWidget(Button.builder(Component.literal("Готово"), b ->
+                minecraft.setScreen(parent)).bounds(width / 2 + 7, height - 61, 169, 22).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xCB162029);
+            super.render(g, mouseX, mouseY, delta);
+            g.drawCenteredString(font, "Карты — сохранённые виды местности",
+                width / 2, 24, 0xFFFFFFFF);
+            g.drawCenteredString(font,
+                "Все виды используют общую исследованную карту своего мира",
+                width / 2, 40, 0xFFB7C4CB);
+        }
+    }
+
+    private static final class MapViewNameScreen extends Screen {
+        private final Screen library, source;
+        private EditBox nameInput;
+        private MapViewNameScreen(Screen library, Screen source) {
+            super(Component.literal("Новая карта"));
+            this.library = library; this.source = source;
+        }
+        @Override protected void init() {
+            int x = width / 2 - 125, y = height / 2 - 22;
+            nameInput = new EditBox(font, x, y, 250, 20, Component.literal("Название карты"));
+            nameInput.setMaxLength(40);
+            nameInput.setValue("Карта " + (RoundMapMapViews.all().size() + 1));
+            addRenderableWidget(nameInput); setInitialFocus(nameInput);
+            addRenderableWidget(Button.builder(Component.literal("Сохранить"), b -> {
+                if (!nameInput.getValue().isBlank() && minecraft.player != null) {
+                    int x0 = minecraft.player.getBlockX(), z0 = minecraft.player.getBlockZ();
+                    if (source instanceof MapScreen map) {
+                        x0 += (int)Math.round(map.panX);
+                        z0 += (int)Math.round(map.panZ);
+                    }
+                    RoundMapMapViews.add(nameInput.getValue(), x0, z0, mapZoom);
+                }
+                minecraft.setScreen(new MapLibraryScreen(source));
+            }).bounds(x, y + 29, 120, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Отмена"), b ->
+                minecraft.setScreen(library))
+                .bounds(x + 130, y + 29, 120, 20).build());
+        }
+        @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+            g.fill(0, 0, width, height, 0xC5162029);
+            super.render(g, mouseX, mouseY, delta);
+            g.drawCenteredString(font, "Сохранить вид карты с текущим центром и масштабом",
+                width / 2, height / 2 - 45, 0xFFFFFFFF);
         }
     }
 
