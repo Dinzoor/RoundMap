@@ -189,7 +189,7 @@ final class RoundMapCaveAtlas {
     }
 
     static void tick(Minecraft mc) {
-        if (mc.level == null || mc.player == null || !RoundMapClient.caveMode) return;
+        if (mc.level == null || mc.player == null || !RoundMapClient.caveScreenActive()) return;
         switchBand(mc);
         int cx = mc.player.getBlockX() >> 4, cz = mc.player.getBlockZ() >> 4;
         long now = System.nanoTime();
