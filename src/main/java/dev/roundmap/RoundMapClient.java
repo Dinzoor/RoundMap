@@ -148,26 +148,49 @@ public final class RoundMapClient implements ClientModInitializer {
         int r = Math.max(0, Math.min(miniSize + 18, height / 2));
         return Math.max(r, Math.min(height - r, miniY < 0 ? miniSize + 18 : (int)Math.round(miniY * height)));
     }
-    private static final int[] MARKER_COLORS = {0xFFFFD640, 0xFFFF6666, 0xFF66CCFF, 0xFF77EE88, 0xFFCF88FF, 0xFFFFFFFF};
-    private record Marker(int x, int y, int z, String dimension, String name, int color) {
+    private static final int[] MARKER_COLORS = {
+        0xFF51CEC6, 0xFF57CCFF, 0xFF67A0FF, 0xFF9759DC,
+        0xFFCE59C1, 0xFFF08DB1, 0xFFF35A59, 0xFFFF913B,
+        0xFFFFD34B, 0xFF8FCF55, 0xFF4DBA81, 0xFFFFFFFF,
+        0xFF989FA5, 0xFF3D5056, 0xFF7A4A30, 0xFF22323D
+    };
+    private static final String[] MARKER_ICONS = {
+        "W", "H", "B", "P", "!", "X", "T", "C", "M", "S", "*", "?"
+    };
+    private static final List<String> folders = new ArrayList<>();
+    private record Marker(int x, int y, int z, String dimension, String name,
+                          int color, int icon, String initials, String folder,
+                          boolean visible, boolean temporary) {
+        Marker(int x, int y, int z, String dimension, String name, int color) {
+            this(x, y, z, dimension, name, color, 0, "", "Основная", true, false);
+        }
         Marker(int x, int z, String dimension, String name) {
             this(x, 64, z, dimension, name, MARKER_COLORS[0]);
         }
+        Marker withVisible(boolean shown) {
+            return new Marker(x, y, z, dimension, name, color, icon,
+                initials, folder, shown, temporary);
+        }
     }
 
-    // Previous global file is intentionally left untouched: it may contain
-    // waypoints belonging to several different worlds.
-    private static final Path LEGACY_WAYPOINT_FILE = FabricLoader.getInstance().getConfigDir()
-        .resolve("roundmap-waypoints.txt");
     private static Path waypointFile;
     private static String markersWorldKey = "";
 
+    private static String encoded(String value) {
+        return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+    private static String decoded(String value) {
+        return new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+    }
+
     private static void syncMarkers(Minecraft mc) {
-        String newKey = RoundMapWorldIdentity.key(mc);
-        if (markersWorldKey.equals(newKey)) return;
-        markersWorldKey = newKey;
+        String key = RoundMapWorldIdentity.key(mc);
+        if (markersWorldKey.equals(key)) return;
+        markersWorldKey = key;
         markers.clear();
-        waypointFile = newKey.isEmpty() ? null : RoundMapWorldIdentity.waypointPath(newKey);
+        folders.clear();
+        folders.add("Основная");
+        waypointFile = key.isEmpty() ? null : RoundMapWorldIdentity.waypointPath(key);
         if (waypointFile != null) loadMarkers();
     }
 
@@ -176,21 +199,30 @@ public final class RoundMapClient implements ClientModInitializer {
         if (waypointFile == null || !Files.isRegularFile(waypointFile)) return;
         try {
             for (String line : Files.readAllLines(waypointFile, StandardCharsets.UTF_8)) {
-                String[] parts = line.split(";", 6);
+                String[] p = line.split(";", -1);
                 try {
-                    if (parts.length == 4) {
-                        // Legacy x;z;dimension;name records remain readable.
-                        markers.add(new Marker(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
-                            new String(Base64.getDecoder().decode(parts[2]), StandardCharsets.UTF_8),
-                            new String(Base64.getDecoder().decode(parts[3]), StandardCharsets.UTF_8)));
-                    } else if (parts.length == 6) {
-                        markers.add(new Marker(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
-                            Integer.parseInt(parts[2]),
-                            new String(Base64.getDecoder().decode(parts[3]), StandardCharsets.UTF_8),
-                            new String(Base64.getDecoder().decode(parts[4]), StandardCharsets.UTF_8),
-                            (int)Long.parseLong(parts[5], 16)));
+                    if (p.length == 2 && p[0].equals("F")) {
+                        String folder = decoded(p[1]);
+                        if (!folder.isBlank() && !folders.contains(folder)) folders.add(folder);
+                    } else if (p.length == 4) {
+                        markers.add(new Marker(Integer.parseInt(p[0]), Integer.parseInt(p[1]),
+                            decoded(p[2]), decoded(p[3])));
+                    } else if (p.length == 6) {
+                        markers.add(new Marker(Integer.parseInt(p[0]), Integer.parseInt(p[1]),
+                            Integer.parseInt(p[2]), decoded(p[3]), decoded(p[4]),
+                            (int)Long.parseLong(p[5], 16)));
+                    } else if (p.length == 10) {
+                        String folder = decoded(p[8]);
+                        if (!folders.contains(folder)) folders.add(folder);
+                        markers.add(new Marker(Integer.parseInt(p[0]), Integer.parseInt(p[1]),
+                            Integer.parseInt(p[2]), decoded(p[3]), decoded(p[4]),
+                            (int)Long.parseLong(p[5], 16),
+                            Math.floorMod(Integer.parseInt(p[6]), MARKER_ICONS.length),
+                            decoded(p[7]), folder, Boolean.parseBoolean(p[9]), false));
                     }
-                } catch (IllegalArgumentException ignored) { }
+                } catch (IllegalArgumentException ignored) {
+                    System.err.println("[RoundMap] Ignored malformed waypoint entry");
+                }
             }
         } catch (IOException e) { System.err.println("[RoundMap] Cannot read waypoints: " + e); }
     }
@@ -198,14 +230,35 @@ public final class RoundMapClient implements ClientModInitializer {
     private static void saveMarkers() {
         if (waypointFile == null) return;
         List<String> lines = new ArrayList<>();
-        for (Marker m : markers) lines.add(m.x() + ";" + m.y() + ";" + m.z() + ";" +
-            Base64.getEncoder().encodeToString(m.dimension().getBytes(StandardCharsets.UTF_8)) + ";" +
-            Base64.getEncoder().encodeToString(m.name().getBytes(StandardCharsets.UTF_8)) + ";" +
-            Integer.toHexString(m.color()));
+        for (String folder : folders) lines.add("F;" + encoded(folder));
+        for (Marker m : markers) {
+            if (m.temporary()) continue;
+            lines.add(m.x() + ";" + m.y() + ";" + m.z() + ";" +
+                encoded(m.dimension()) + ";" + encoded(m.name()) + ";" +
+                Integer.toHexString(m.color()) + ";" + m.icon() + ";" +
+                encoded(m.initials()) + ";" + encoded(m.folder()) + ";" + m.visible());
+        }
         try {
             Files.createDirectories(waypointFile.getParent());
             Files.write(waypointFile, lines, StandardCharsets.UTF_8);
         } catch (IOException e) { System.err.println("[RoundMap] Cannot save waypoints: " + e); }
+    }
+
+    private static String markerSymbol(Marker marker) {
+        if (!marker.initials().isBlank()) return marker.initials();
+        return MARKER_ICONS[marker.icon()];
+    }
+
+    private static void waypointPin(GuiGraphics g, Minecraft mc, int x, int y,
+                                    Marker marker, boolean small) {
+        int r = small ? 5 : 8;
+        g.fill(x - r - 1, y - r - 2, x + r + 2, y + r + 1, 0xFF172029);
+        g.fill(x - r, y - r - 1, x + r + 1, y + r, marker.color());
+        g.fill(x - 2, y + r, x + 3, y + r + (small ? 3 : 5), 0xFF172029);
+        g.fill(x - 1, y + r, x + 2, y + r + (small ? 2 : 4), marker.color());
+        String glyph = markerSymbol(marker);
+        if (glyph.length() > 2) glyph = glyph.substring(0, 2);
+        g.drawCenteredString(mc.font, glyph, x, y - 4, 0xFF121C27);
     }
 
     @Override public void onInitializeClient() {
