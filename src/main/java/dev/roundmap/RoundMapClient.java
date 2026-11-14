@@ -296,6 +296,23 @@ public final class RoundMapClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             syncMarkers(client);
             RoundMapMapViews.sync(client);
+            RoundMapBedTracker.tick(client, position -> {
+                boolean exists = false;
+                for (Marker marker : markers) {
+                    if (marker.name().equals("Кровать") &&
+                        Math.abs(marker.x() - position.getX()) <= 1 &&
+                        Math.abs(marker.z() - position.getZ()) <= 1 &&
+                        marker.dimension().equals(client.level.dimension().toString())) {
+                        exists = true; break;
+                    }
+                }
+                if (!exists) {
+                    markers.add(new Marker(position.getX(), position.getY(),
+                        position.getZ(), client.level.dimension().toString(),
+                        "Кровать", 0xFFFA4D53, 2, "", "Основная", true, false));
+                    saveMarkers();
+                }
+            });
             RoundMapAtlas.tick(client);
             if (client.player == null || client.level == null || client.screen != null) return;
             if (mapKey.consumeClick()) client.setScreen(new MapScreen());
