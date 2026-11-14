@@ -324,12 +324,10 @@ final class RoundMapTextures {
 
     private static FullBuild createBuild(double x, double z,
                                          double zoom, Image image, int drawW) {
-        // Alpha.15 allowed zoom out to 0.1 but STILL baked the terrain
-        // at a minimum zoom of 0.5, causing a tiny explored island amid fog.
-        // Subpixel zooms must bake the requested broad world region.
-        double baked = zoom < 1.0
-            ? Math.max(0.1, Math.round(zoom * 32.0) / 32.0)
-            : Math.max(1.0, Math.round(zoom * 4.0) / 4.0);
+        // Keep the precise requested zoom rather than snapping to coarse
+        // fractions. At far zoom these quantized levels caused softness.
+        // Full image rebuilds only when the wheel animation is finished.
+        double baked = Math.max(0.1, Math.min(16.0, zoom));
         return new FullBuild((int)Math.floor(x), (int)Math.floor(z), baked,
             RoundMapAtlas.revision(), drawW, image.width, image.height);
     }
@@ -379,8 +377,10 @@ final class RoundMapTextures {
             screenW, screenH, drawW, drawH);
         boolean haveFull = FULL.centerX != Integer.MIN_VALUE;
         boolean havePreview = PREVIEW.centerX != Integer.MIN_VALUE;
+        // Use a ratio instead of absolute 0.16 px/block tolerance:
+        // at zoom 0.1 a 0.1 difference is a twofold loss in detail.
         boolean needNewRaster = !fullCovers || FULL.zoomKey <= 0
-            || Math.abs(bakedZoom(FULL) - zoom) > Math.max(0.16, zoom * 0.09);
+            || Math.abs(Math.log(zoom / bakedZoom(FULL))) > 0.075;
         boolean terrainDirty = FULL.revision != RoundMapAtlas.revision() &&
             (FULL.updatedAt == 0 ||
              System.nanoTime() - FULL.updatedAt > 650_000_000L);
@@ -389,7 +389,7 @@ final class RoundMapTextures {
         // while the previous detailed texture remains continuously scalable.
         if (!haveFull && (!havePreview || !previewCovers) && !zooming) {
             if (previewBuild == null ||
-                Math.abs(previewBuild.zoom - zoom) > Math.max(0.30, zoom * .12) ||
+                Math.abs(Math.log(zoom / previewBuild.zoom)) > 0.14 ||
                 Math.abs(previewBuild.centerX - worldX) * zoom > padding ||
                 Math.abs(previewBuild.centerZ - worldZ) * zoom > padding) {
                 previewBuild = createBuild(worldX, worldZ, zoom, PREVIEW, drawW);
@@ -410,7 +410,7 @@ final class RoundMapTextures {
         // Do not restart a bake for each wheel tick or animation frame.
         // The old high-res texture is scaled immediately on GPU.
         if (fullBuild != null &&
-            (Math.abs(fullBuild.zoom - zoom) > Math.max(0.18, zoom * 0.09) ||
+            (Math.abs(Math.log(zoom / fullBuild.zoom)) > 0.075 ||
              Math.abs(fullBuild.centerX - worldX) * zoom > padding * 1.5 ||
              Math.abs(fullBuild.centerZ - worldZ) * zoom > padding * 1.5))
             fullBuild = null;
