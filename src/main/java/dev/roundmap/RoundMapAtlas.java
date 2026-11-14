@@ -10,6 +10,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import net.minecraft.world.level.block.Blocks;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +54,18 @@ final class RoundMapAtlas {
         return t;
     });
     private static final Map<Long, Tile> tiles = new HashMap<>();
+    // Four-by-four texture samples per mapped block, held only near the
+    // player while the fullscreen map is highly zoomed. Max about 16 MiB.
+    private static final int MICRO_CAP = 256;
+    private static final Set<Long> microReady = new HashSet<>();
+    private static final LinkedHashMap<Long, int[]> microTiles =
+        new LinkedHashMap<>(64, .75f, true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<Long, int[]> eldest) {
+                if (size() <= MICRO_CAP) return false;
+                microReady.remove(eldest.getKey());
+                return true;
+            }
+        };
     // Force a single repair scan per red-dominated tile in this session.
     // The old atlas is preserved while updated terrain samples arrive.
     private static final java.util.Set<Long> redRepairAttempted = new java.util.HashSet<>();
@@ -58,6 +73,7 @@ final class RoundMapAtlas {
     private static final ArrayDeque<Long> nearbyMedium = new ArrayDeque<>();
     private static final ArrayDeque<Long> coarseQueue = new ArrayDeque<>();
     private static final ArrayDeque<Long> nearbyFine = new ArrayDeque<>();
+    private static final ArrayDeque<Long> nearbyMicro = new ArrayDeque<>();
     private static final ArrayDeque<Long> mediumQueue = new ArrayDeque<>();
     private static final ArrayDeque<Long> fineQueue = new ArrayDeque<>();
     private static Object world;
@@ -68,7 +84,8 @@ final class RoundMapAtlas {
     private static int lastChunkX = Integer.MIN_VALUE, lastChunkZ = Integer.MIN_VALUE;
     private static int lastViewRadius = -1;
     private static long active = Long.MIN_VALUE;
-    private static int activeIndex, activeStep;
+    private static int activeIndex, activeStep, activeTarget;
+    private static boolean activeMicro;
     private static int revision;
 
     private static final class Tile {
@@ -90,11 +107,14 @@ final class RoundMapAtlas {
     static void onResourcePackReload() {
         // Preserve explored tiles. Force re-refinement when they become
         // visible, rather than erasing saved exploration on every F3+T.
+        microTiles.clear();
+        microReady.clear();
         for (Tile t : tiles.values()) if (t.stage == 3) t.stage = 2;
         nearbyCoarse.clear();
         nearbyMedium.clear();
         coarseQueue.clear();
         nearbyFine.clear();
+        nearbyMicro.clear();
         mediumQueue.clear();
         fineQueue.clear();
         active = Long.MIN_VALUE;
@@ -115,6 +135,9 @@ final class RoundMapAtlas {
             Tile tile = tiles.get(key(cx + dx, cz + dz));
             if (tile != null && tile.stage > 0)
                 tile.stage = Math.min(tile.stage, 2);
+            long selected = key(cx + dx, cz + dz);
+            microTiles.remove(selected);
+            microReady.remove(selected);
         }
         active = Long.MIN_VALUE;
         forceRefresh();
@@ -249,6 +272,15 @@ final class RoundMapAtlas {
         return invalidFallback(color) ? 0 : color;
     }
 
+    static int microColorAt(int x, int z, int subX, int subZ) {
+        int[] colors = microTiles.get(key(x >> 4, z >> 4));
+        if (colors == null) return 0;
+        int cell = ((z & 15) << 4) | (x & 15);
+        return colors[cell * 16 + (subZ & 3) * 4 + (subX & 3)];
+    }
+
+    static int cachedMicroChunks() { return microReady.size(); }
+
     static int lightAt(int x, int z) {
         Tile tile = tiles.get(key(x >> 4, z >> 4));
         if (tile == null) return 0;
@@ -316,11 +348,14 @@ final class RoundMapAtlas {
         if (world == mc.level && worldKey.equals(currentWorldKey)) return;
         saveAsync();
         tiles.clear();
+        microTiles.clear();
+        microReady.clear();
         redRepairAttempted.clear();
         nearbyCoarse.clear();
         nearbyMedium.clear();
         coarseQueue.clear();
         nearbyFine.clear();
+        nearbyMicro.clear();
         mediumQueue.clear();
         fineQueue.clear();
         active = Long.MIN_VALUE;
@@ -664,6 +699,7 @@ final class RoundMapAtlas {
         nearbyMedium.clear();
         coarseQueue.clear();
         nearbyFine.clear();
+        nearbyMicro.clear();
         mediumQueue.clear();
         fineQueue.clear();
         // Don't interrupt the active chunk when the camera moves or a new
