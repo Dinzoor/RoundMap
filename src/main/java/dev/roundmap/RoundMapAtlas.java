@@ -311,7 +311,10 @@ final class RoundMapAtlas {
             if (mapColor == MapColor.NONE) {
                 // A resource-pack model may define the full appearance of
                 // a block even if vanilla MapColor is NONE. Try its top face.
-                int modelColor = RoundMapBlockPalette.color(mc, state, ground, 0);
+                // Never decode resource-pack textures for the fast one-pixel
+                // chunk preview. Medium/full passes will inspect the model.
+                int modelColor = activeStep == 16 ? 0
+                    : RoundMapBlockPalette.color(mc, state, ground, 0);
                 boolean hasTexture = modelColor != 0;
                 // Ignore thin plants or other non-map-color blocks; use the
                 // underlying solid surface where possible.
