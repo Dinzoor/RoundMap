@@ -125,13 +125,14 @@ final class RoundMapAtlas {
         return r >= 175 && g <= 24 && b <= 24 && Math.abs(g - b) <= 10;
     }
 
-    // Invalid data should become unexplored fog until it can be rescanned.
+    // Only a known old *gray sentinel* denotes missing terrain.
+    // Alpha.15 mistakenly treated bright-red real/custom block colors as
+    // absent, turning entire explored worlds into fog.
     private static boolean invalidFallback(int color) {
         int r = (color >>> 16) & 255;
         int g = (color >>> 8) & 255;
         int b = color & 255;
-        return (r >= 59 && r <= 109 && g - r == 8 && b == g)
-            || invalidRed(color);
+        return r >= 59 && r <= 109 && g - r == 8 && b == g;
     }
 
     private static long key(int cx, int cz) {
@@ -265,16 +266,28 @@ final class RoundMapAtlas {
                         else if (version == LEGACY_MAGIC)
                             stage = stage > 0 ? 2 : 0;
                         boolean invalid = false;
+                        int vividRed = 0;
                         for (int p = 0; p < 256; p++) {
                             if (invalidFallback(colors[p])) {
                                 colors[p] = 0;
                                 if (heights != null) heights[p] = Short.MIN_VALUE;
                                 invalid = true;
+                            } else if (invalidRed(colors[p])) {
+                                vividRed++;
                             }
                         }
-                        if (invalid) {
-                            stage = 0; // Re-explore those chunks on the next visit.
+                        // Repair obviously corrupt, solid-red old atlas
+                        // chunks without erasing the explored terrain mask.
+                        // Sporadic real red blocks are left untouched.
+                        if (vividRed >= 192) {
+                            for (int p = 0; p < 256; p++)
+                                if (invalidRed(colors[p])) colors[p] = 0xFF81868D;
+                            stage = Math.min(stage, 2); // Resample if seen.
                         }
+                        // Alpha.15 may already have written zeros to disk.
+                        // Those lost colors cannot be reconstructed from the
+                        // save alone: prioritize fresh client chunk scanning.
+                        if (invalid) stage = 0;
                         loaded.put(k, new Tile(stage, colors, heights, lights));
                     }
                 } catch (IOException e) {
@@ -394,16 +407,15 @@ final class RoundMapAtlas {
                 ? mapColor.col | 0xFF000000
                 : RoundMapBlockPalette.color(mc, state, ground,
                     mapColor == MapColor.NONE ? 0 : mapColor.col | 0xFF000000);
-            // Never store the known near-pure-red renderer fallback again.
-            // Prefer the vanilla material color when a custom texture fails;
-            // unsupported pure-red-only models remain uncharted.
+            // Some custom server block models expose a placeholder red
+            // pixel. Never discard the chunk (alpha.15 did, creating fog).
+            // Prefer the block's material MapColor when usable; otherwise
+            // keep a neutral fallback and allow the scan to finish.
             if (invalidRed(color)) {
-                if (mapColor != MapColor.NONE &&
-                    !invalidRed(mapColor.col)) {
+                if (mapColor != MapColor.NONE && !invalidRed(mapColor.col)) {
                     color = mapColor.col | 0xFF000000;
                 } else {
-                    active = Long.MIN_VALUE;
-                    continue;
+                    color = 0xFF81868D; // Unknown server material, not fog.
                 }
             }
             // A lightweight biome-aware material palette. Capture only on the
