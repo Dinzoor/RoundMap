@@ -233,9 +233,12 @@ final class RoundMapTextures {
 
     private static FullBuild createBuild(double x, double z,
                                          double zoom, Image image, int drawW) {
-        // Quarter-step texture LOD: GUI animation uses continuous scale, but
-        // terrain needs to be baked only when the user finishes scrolling.
-        double baked = Math.max(0.5, Math.round(zoom * 4.0) / 4.0);
+        // Alpha.15 allowed zoom out to 0.1 but STILL baked the terrain
+        // at a minimum zoom of 0.5, causing a tiny explored island amid fog.
+        // Subpixel zooms must bake the requested broad world region.
+        double baked = zoom < 1.0
+            ? Math.max(0.1, Math.round(zoom * 32.0) / 32.0)
+            : Math.max(1.0, Math.round(zoom * 4.0) / 4.0);
         return new FullBuild((int)Math.floor(x), (int)Math.floor(z), baked,
             RoundMapAtlas.revision(), drawW, image.width, image.height);
     }
