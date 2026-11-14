@@ -525,13 +525,22 @@ public final class RoundMapClient implements ClientModInitializer {
         outline(g, cx, cy, miniSize);
         RoundMapRadar.draw(g, mc, cx, cy, mc.player.getBlockX(), mc.player.getBlockZ(),
             (float)(miniSize * miniZoom / HALF), miniSize, miniSize, true);
-        drawMarkers(g, mc, cx, cy, (float)(miniSize * miniZoom / HALF), miniSize,
-            true, mc.player.getBlockX(), mc.player.getBlockZ());
+        drawMiniWaypoints(g, mc, cx, cy);
         playerArrow(g, mc, cx, cy);
-        if (showCompass) g.drawCenteredString(mc.font, "N", cx, cy - miniSize - 11, -1);
-        if (showCoords) g.drawCenteredString(mc.font,
-            "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(),
-            cx, cy + miniSize + 8, -1);
+        if (showCompass) {
+            // North-up map: N and S are at the top/bottom, E/W on the sides.
+            g.drawCenteredString(mc.font, "N", cx, cy - miniSize - 12, 0xFFFFFFFF);
+            g.drawCenteredString(mc.font, "S", cx, cy + miniSize + 5, 0xFFFFFFFF);
+            g.drawCenteredString(mc.font, "E", cx + miniSize + 11, cy - 4, 0xFFFFFFFF);
+            g.drawCenteredString(mc.font, "W", cx - miniSize - 11, cy - 4, 0xFFFFFFFF);
+        }
+        int bottomLabel = miniSize + (showCompass ? 18 : 8);
+        if (showCoords) {
+            g.drawCenteredString(mc.font,
+                "X: " + mc.player.getBlockX() + " Z: " + mc.player.getBlockZ(),
+                cx, cy + bottomLabel, 0xFFFFFFFF);
+            bottomLabel += 11;
+        }
         if (showBiome) {
             long now = System.nanoTime();
             if (now > biomeRefreshAt) {
@@ -540,7 +549,62 @@ public final class RoundMapClient implements ClientModInitializer {
                     .map(k -> k.identifier().getPath().replace('_', ' ')).orElse("unknown");
             }
             g.drawCenteredString(mc.font, "Биом: " + biomeLabel,
-                cx, cy + miniSize + (showCoords ? 19 : 8), 0xFFFFFFFF);
+                cx, cy + bottomLabel, 0xFFFFFFFF);
+        }
+    }
+
+    /**
+     * Show every relevant destination even when it is beyond the visible
+     * terrain circle. Off-map pins are clamped to the rim and keep their
+     * actual horizontal distance in meters. The closest three labels are
+     * shown to avoid covering the entire HUD.
+     */
+    private static void drawMiniWaypoints(GuiGraphics g, Minecraft mc, int cx, int cy) {
+        List<Marker> visible = new ArrayList<>();
+        String dimension = mc.level.dimension().toString();
+        for (Marker marker : markers) {
+            if (marker.visible() && marker.dimension().equals(dimension))
+                visible.add(marker);
+        }
+        visible.sort(java.util.Comparator.comparingDouble(m ->
+            Math.hypot(m.x() - mc.player.getX(), m.z() - mc.player.getZ())));
+        double scale = miniSize * miniZoom / (double)HALF;
+        int edge = Math.max(8, miniSize - 11);
+        int maxLabels = Math.min(3, visible.size());
+        int[] labelY = new int[maxLabels];
+        for (int i = 0; i < visible.size(); i++) {
+            Marker marker = visible.get(i);
+            double dx = (marker.x() + 0.5 - mc.player.getX()) * scale;
+            double dz = (marker.z() + 0.5 - mc.player.getZ()) * scale;
+            double length = Math.hypot(dx, dz);
+            // Clamp distant waypoints to the minimap border; their world
+            // coordinates do not change, only their HUD indicator moves.
+            if (length > edge) {
+                dx *= edge / length;
+                dz *= edge / length;
+            }
+            int px = cx + (int)Math.round(dx);
+            int py = cy + (int)Math.round(dz);
+            waypointPin(g, mc, px, py, marker, true);
+            if (!showLabels || i >= maxLabels) continue;
+            int distance = (int)Math.round(Math.hypot(
+                marker.x() + 0.5 - mc.player.getX(),
+                marker.z() + 0.5 - mc.player.getZ()));
+            String label = marker.name() + " · " + distance + " м";
+            if (label.length() > 24) label = label.substring(0, 21) + "...";
+            int textWidth = mc.font.width(label);
+            int lx = Math.max(textWidth / 2 + 3, Math.min(
+                g.guiWidth() - textWidth / 2 - 3, px));
+            int ly = py - 19;
+            if (ly < cy - miniSize + 10) ly = py + 13;
+            // Separate almost overlapping labels for neighboring pins.
+            for (int j = 0; j < i; j++) {
+                if (Math.abs(ly - labelY[j]) < 12) ly += 12;
+            }
+            labelY[i] = ly;
+            g.fill(lx - textWidth / 2 - 3, ly - 2,
+                lx + textWidth / 2 + 4, ly + 10, 0xB3141D27);
+            g.drawCenteredString(mc.font, label, lx, ly, 0xFFFFFFFF);
         }
     }
 
