@@ -12,20 +12,27 @@ final class RoundMapTextures {
     static void invalidate() {
         MINI.invalidate();
         FULL.invalidate();
+        PREVIEW.invalidate();
         FULL.centerX = Integer.MIN_VALUE; // Never show terrain from the prior world.
+        PREVIEW.centerX = Integer.MIN_VALUE;
         fullBuild = null;
+        previewBuild = null;
     }
     private static final Image MINI = new Image("roundmap_minimap");
     private static final Image FULL = new Image("roundmap_fullmap");
+    private static final Image PREVIEW = new Image("roundmap_preview");
 
     // Keep sampling work small enough to run between display frames.
     // While rows are updated in CPU memory the GPU continues displaying the
     // previous texture, shifted every frame by the current mouse position.
     private static FullBuild fullBuild;
+    private static FullBuild previewBuild;
 
     private static final class FullBuild {
         final int centerX, centerZ, zoom, revision, drawW, texW, texH;
         int nextRow;
+        int previousWorldZ = Integer.MIN_VALUE;
+        final int[] lastRow;
         FullBuild(int centerX, int centerZ, int zoom, int revision,
                   int drawW, int texW, int texH) {
             this.centerX = centerX;
@@ -35,6 +42,7 @@ final class RoundMapTextures {
             this.drawW = drawW;
             this.texW = texW;
             this.texH = texH;
+            this.lastRow = new int[texW];
         }
     }
 
@@ -104,92 +112,141 @@ final class RoundMapTextures {
             radius * 2, radius * 2, pixels, pixels, pixels, pixels);
     }
 
+    private static boolean covered(Image image, double x, double z,
+                                   int zoom, int padding) {
+        if (image.centerX == Integer.MIN_VALUE || image.zoomKey != zoom) return false;
+        return Math.abs((x - image.centerX) * zoom) < padding * .85
+            && Math.abs((z - image.centerZ) * zoom) < padding * .85;
+    }
+
     /**
-     * The fullscreen map is a movable GPU quad backed by a texture larger
-     * than the screen. Repainting it is spread over multiple frames, so
-     * terrain exploration never blocks mouse dragging for an entire atlas.
+     * Draw terrain into the CPU-side texture a little at a time.
+     * Consecutive output pixels often represent the same block, so only
+     * evaluate fog/hillshade once per unique world coordinate.
+     */
+    private static boolean pump(FullBuild build, Image image,
+                                int maxRows, long budgetNanos) {
+        long started = System.nanoTime();
+        int end = Math.min(build.texH, build.nextRow + maxRows);
+        for (int py = build.nextRow; py < end; py++) {
+            int wz = build.centerZ + (int)Math.floor(
+                (py + .5 - build.texH / 2.0)
+                * build.drawW / (double)(build.texW * build.zoom));
+            int lastX = Integer.MIN_VALUE, current = 0;
+            for (int px = 0; px < build.texW; px++) {
+                if (wz == build.previousWorldZ) {
+                    current = build.lastRow[px];
+                } else {
+                    int wx = build.centerX + (int)Math.floor(
+                        (px + .5 - build.texW / 2.0)
+                        * build.drawW / (double)(build.texW * build.zoom));
+                    if (wx != lastX) {
+                        current = RoundMapFog.color(wx, wz);
+                        lastX = wx;
+                    }
+                    build.lastRow[px] = current;
+                }
+                image.pixels.setPixel(px, py, current);
+            }
+            build.previousWorldZ = wz;
+            build.nextRow = py + 1;
+            if (System.nanoTime() - started >= budgetNanos) break;
+        }
+        if (build.nextRow < build.texH) return false;
+        image.texture.upload();
+        image.centerX = build.centerX;
+        image.centerZ = build.centerZ;
+        image.zoomKey = build.zoom;
+        image.revision = build.revision;
+        image.updatedAt = System.nanoTime();
+        return true;
+    }
+
+    private static FullBuild createBuild(double x, double z,
+                                         int zoom, Image image, int drawW) {
+        return new FullBuild((int)Math.floor(x), (int)Math.floor(z), zoom,
+            RoundMapAtlas.revision(), drawW, image.width, image.height);
+    }
+
+    private static void drawMappedImage(GuiGraphics g, Image image,
+            int padding, int drawW, int drawH, double worldX, double worldZ,
+            int zoom) {
+        int offsetX = (int)Math.round((image.centerX - worldX) * zoom);
+        int offsetZ = (int)Math.round((image.centerZ - worldZ) * zoom);
+        g.blit(RenderPipelines.GUI_TEXTURED, image.id,
+            -padding + offsetX, -padding + offsetZ, 0f, 0f,
+            drawW, drawH, image.width, image.height, image.width, image.height);
+    }
+
+    /**
+     * Fast 320-pixel terrain preview appears first. The final 1024-pixel
+     * texture then bakes incrementally without blocking the map UI.
      */
     static void fullscreen(GuiGraphics g, int screenW, int screenH,
                            double worldX, double worldZ, int zoom, boolean dragging) {
         final int padding = 256;
         int drawW = screenW + padding * 2;
         int drawH = screenH + padding * 2;
-        // Higher-resolution terrain texture preserves individual terrain
-        // blocks at zoom, while the progressive builder caps CPU time.
+
         int tw = Math.min(1024, Math.max(128, drawW));
-        int th = Math.min(640, Math.max(128,
-            (int)Math.round(tw * (drawH / (double)drawW))));
+        int th = Math.min(1024, Math.max(128,
+            (int)Math.round(tw * drawH / (double)drawW)));
         FULL.allocate(tw, th);
 
-        long now = System.nanoTime();
-        boolean empty = FULL.centerX == Integer.MIN_VALUE;
-        boolean zoomChanged = zoom != FULL.zoomKey;
-        double shiftX = empty ? 0 : (worldX - FULL.centerX) * zoom;
-        double shiftZ = empty ? 0 : (worldZ - FULL.centerZ) * zoom;
-        boolean beyondTexture = empty || zoomChanged ||
-            Math.abs(shiftX) >= padding * 0.82 ||
-            Math.abs(shiftZ) >= padding * 0.82;
-        boolean drifted = !dragging &&
-            (Math.abs(shiftX) >= padding * 0.52 ||
-             Math.abs(shiftZ) >= padding * 0.52);
-        boolean dataChanged = !dragging && FULL.revision != RoundMapAtlas.revision() &&
-            (FULL.updatedAt == 0 || now - FULL.updatedAt >= 1_200_000_000L);
+        int pw = Math.min(320, Math.max(128, drawW));
+        int ph = Math.max(80, (int)Math.round(pw * drawH / (double)drawW));
+        PREVIEW.allocate(pw, ph);
 
-        if (fullBuild != null) {
-            // A changed screen geometry or zoom invalidates a partial build.
-            if (fullBuild.texW != tw || fullBuild.texH != th || fullBuild.zoom != zoom
-                || Math.abs((worldX - fullBuild.centerX) * zoom) > padding * 1.75
-                || Math.abs((worldZ - fullBuild.centerZ) * zoom) > padding * 1.75) {
-                fullBuild = null;
+        boolean haveFull = covered(FULL, worldX, worldZ, zoom, padding);
+        boolean havePreview = covered(PREVIEW, worldX, worldZ, zoom, padding);
+
+        // Open a map or pan beyond the previous texture: show a low-detail
+        // viewport promptly rather than waiting for the huge texture bake.
+        if (!haveFull && !havePreview) {
+            if (previewBuild == null || previewBuild.zoom != zoom ||
+                Math.abs((worldX - previewBuild.centerX) * zoom) > padding ||
+                Math.abs((worldZ - previewBuild.centerZ) * zoom) > padding) {
+                previewBuild = createBuild(worldX, worldZ, zoom, PREVIEW, drawW);
             }
-        }
-        if (fullBuild == null && (beyondTexture || drifted || dataChanged)) {
-            // On an atlas-content update keep the same anchor: the player and
-            // markers cannot jump whenever newly explored chunks arrive.
-            int anchorX = beyondTexture || drifted ? (int)Math.floor(worldX) : FULL.centerX;
-            int anchorZ = beyondTexture || drifted ? (int)Math.floor(worldZ) : FULL.centerZ;
-            fullBuild = new FullBuild(anchorX, anchorZ, zoom,
-                RoundMapAtlas.revision(), drawW, tw, th);
-        }
-        if (fullBuild != null) {
-            FullBuild build = fullBuild;
-            double blocksPerPixel = build.drawW / (double)(build.texW * build.zoom);
-            long started = System.nanoTime();
-            // Cap both row count and CPU time so 200+ FPS hardware doesn't
-            // suffer from a single long blocking map repaint.
-            int endRow = Math.min(build.texH, build.nextRow + 16);
-            for (int py = build.nextRow; py < endRow; py++) {
-                int wz = build.centerZ +
-                    (int)Math.floor((py + .5 - build.texH / 2.0) * blocksPerPixel);
-                for (int px = 0; px < build.texW; px++) {
-                    int wx = build.centerX +
-                        (int)Math.floor((px + .5 - build.texW / 2.0) * blocksPerPixel);
-                    FULL.pixels.setPixel(px, py, RoundMapFog.color(wx, wz));
-                }
-                build.nextRow = py + 1;
-                if (System.nanoTime() - started > 2_500_000L) break;
-            }
-            if (build.nextRow >= build.texH) {
-                FULL.texture.upload();
-                FULL.centerX = build.centerX;
-                FULL.centerZ = build.centerZ;
-                FULL.zoomKey = build.zoom;
-                FULL.revision = build.revision;
-                FULL.updatedAt = System.nanoTime();
-                fullBuild = null;
+            if (pump(previewBuild, PREVIEW, 42, 3_500_000L)) {
+                previewBuild = null;
+                havePreview = true;
             }
         }
 
-        // Light fog in uncovered regions rather than a dark blank texture.
+        double shiftX = FULL.centerX == Integer.MIN_VALUE ? 0 :
+            (worldX - FULL.centerX) * zoom;
+        double shiftZ = FULL.centerZ == Integer.MIN_VALUE ? 0 :
+            (worldZ - FULL.centerZ) * zoom;
+        boolean newView = FULL.centerX == Integer.MIN_VALUE || FULL.zoomKey != zoom
+            || Math.abs(shiftX) > padding * .58
+            || Math.abs(shiftZ) > padding * .58;
+        boolean dirty = !dragging && FULL.revision != RoundMapAtlas.revision()
+            && (FULL.updatedAt == 0 ||
+                System.nanoTime() - FULL.updatedAt > 500_000_000L);
+
+        // Prioritize the preview if the player has no map on screen yet.
+        if ((haveFull || havePreview) && fullBuild == null && (newView || dirty)) {
+            fullBuild = newView ? createBuild(worldX, worldZ, zoom, FULL, drawW)
+                : new FullBuild(FULL.centerX, FULL.centerZ, zoom,
+                    RoundMapAtlas.revision(), drawW, FULL.width, FULL.height);
+        }
+        if (fullBuild != null && (fullBuild.zoom != zoom
+            || Math.abs((worldX - fullBuild.centerX) * zoom) > padding * 1.5
+            || Math.abs((worldZ - fullBuild.centerZ) * zoom) > padding * 1.5)) {
+            fullBuild = null;
+        }
+        if (fullBuild != null && pump(fullBuild, FULL, 32, 2_500_000L)) {
+            fullBuild = null;
+            haveFull = covered(FULL, worldX, worldZ, zoom, padding);
+        }
+
+        // Undiscovered blocks always appear as fog, never black/transparent.
         g.fill(0, 0, screenW, screenH,
-            RoundMapClient.brightFog ? 0xFFF1F2F6 : 0xFF27303A);
-        if (FULL.centerX != Integer.MIN_VALUE && zoom == FULL.zoomKey) {
-            int offsetX = (int)Math.round((FULL.centerX - worldX) * zoom);
-            int offsetZ = (int)Math.round((FULL.centerZ - worldZ) * zoom);
-            g.blit(RenderPipelines.GUI_TEXTURED, FULL.id,
-                -padding + offsetX, -padding + offsetZ, 0f, 0f,
-                drawW, drawH, tw, th, tw, th);
-        }
+            RoundMapClient.brightFog ? 0xFFF2F3F7 : 0xFF29313A);
+        if (haveFull) drawMappedImage(g, FULL, padding, drawW, drawH, worldX, worldZ, zoom);
+        else if (havePreview)
+            drawMappedImage(g, PREVIEW, padding, drawW, drawH, worldX, worldZ, zoom);
     }
 
     private RoundMapTextures() {}
