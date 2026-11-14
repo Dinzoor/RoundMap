@@ -63,5 +63,11 @@ final class RoundMapWorldIdentity {
             .resolve(hashed(key) + ".txt");
     }
 
+    static Path mapViewsPath(String key) {
+        return FabricLoader.getInstance().getConfigDir()
+            .resolve("roundmap").resolve("map_views").resolve("v1")
+            .resolve(hashed(key) + ".txt");
+    }
+
     private RoundMapWorldIdentity() {}
 }
