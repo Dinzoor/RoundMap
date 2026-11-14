@@ -247,6 +247,10 @@ final class RoundMapTextures {
         if (haveFull) drawMappedImage(g, FULL, padding, drawW, drawH, worldX, worldZ, zoom);
         else if (havePreview)
             drawMappedImage(g, PREVIEW, padding, drawW, drawH, worldX, worldZ, zoom);
+        else if (FULL.centerX != Integer.MIN_VALUE && FULL.zoomKey == zoom)
+            // Retain the edge of the previous view while the user drags into
+            // unexplored space; don't abruptly turn the whole screen blank.
+            drawMappedImage(g, FULL, padding, drawW, drawH, worldX, worldZ, zoom);
     }
 
     private RoundMapTextures() {}
