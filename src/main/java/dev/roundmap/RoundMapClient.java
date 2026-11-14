@@ -454,34 +454,62 @@ public final class RoundMapClient implements ClientModInitializer {
      * Project named world markers using horizontal bearing, camera pitch and
      * elevation. It is a lightweight directional overlay, not a 3-D beam.
      */
+    /**
+     * Pin waypoints to their saved 3D world coordinates.
+     *
+     * Project them from the actual game camera (not the player's block
+     * position), with perspective and correct pitch. The marker is fixed
+     * to the place in the world: turning or walking moves its image exactly
+     * as any stationary block would move through the camera view.
+     */
     private static void drawWorldMarkers(GuiGraphics g, Minecraft mc) {
-        double yaw = Math.toRadians(mc.player.getYRot());
-        double pitch = Math.toRadians(mc.player.getXRot());
-        double forwardX = -Math.sin(yaw), forwardZ = Math.cos(yaw);
-        double rightX = forwardZ, rightZ = -forwardX;
+        net.minecraft.client.Camera camera = mc.gameRenderer.getMainCamera();
+        net.minecraft.world.phys.Vec3 eye = camera.getPosition();
+        double yaw = Math.toRadians(camera.getYRot());
+        double pitch = Math.toRadians(camera.getXRot());
+        double cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
+        // Minecraft yaw = 0 faces +Z, positive pitch looks down.
+        double horizontalX = -Math.sin(yaw), horizontalZ = Math.cos(yaw);
+        double rightX = horizontalZ, rightZ = -horizontalX;
+        double forwardX = horizontalX * cosPitch;
+        double forwardY = -sinPitch;
+        double forwardZ = horizontalZ * cosPitch;
+        double upX = horizontalX * sinPitch;
+        double upY = cosPitch;
+        double upZ = horizontalZ * sinPitch;
+
         int w = g.guiWidth(), h = g.guiHeight();
+        double verticalFov = Math.toRadians(
+            Math.max(30.0, Math.min(110.0, mc.options.fov().get())));
+        double focal = (h * 0.5) / Math.tan(verticalFov * 0.5);
         for (Marker marker : markers) {
-            if (!marker.visible() || !marker.dimension().equals(mc.level.dimension().toString())) continue;
-            double dx = marker.x() + 0.5 - mc.player.getX();
-            double dy = marker.y() + 0.5 - (mc.player.getY() + 1.62);
-            double dz = marker.z() + 0.5 - mc.player.getZ();
-            double distance2d = Math.hypot(dx, dz);
-            double distance = Math.hypot(distance2d, dy);
-            if (distance < 1.0 || distance > worldMarkerDistance) continue;
-            double forward = dx * forwardX + dz * forwardZ;
-            if (forward <= 0) continue;
-            double side = dx * rightX + dz * rightZ;
-            double angle = Math.atan2(side, forward);
-            if (Math.abs(angle) > Math.toRadians(55)) continue;
-            int sx = w / 2 + (int)Math.round(angle / Math.toRadians(55) * w * 0.43);
-            double elevation = Math.atan2(dy, distance2d);
-            int sy = h / 2 - (int)Math.round((elevation + pitch) / Math.toRadians(55) * h * 0.5);
-            if (sy < 40 || sy > h - 38) continue;
-            String label = marker.name() + " - " + (int)Math.round(distance) + " m";
+            if (!marker.visible() ||
+                !marker.dimension().equals(mc.level.dimension().toString())) continue;
+
+            // A fixed world point above the actual saved waypoint block.
+            double dx = marker.x() + 0.5 - eye.x;
+            double dy = marker.y() + 1.65 - eye.y;
+            double dz = marker.z() + 0.5 - eye.z;
+            double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (distance > worldMarkerDistance) continue;
+
+            double cameraDepth = dx * forwardX + dy * forwardY + dz * forwardZ;
+            if (cameraDepth <= 0.08) continue;
+            double cameraRight = dx * rightX + dz * rightZ;
+            double cameraUp = dx * upX + dy * upY + dz * upZ;
+            double sxDouble = w * 0.5 + focal * cameraRight / cameraDepth;
+            double syDouble = h * 0.5 - focal * cameraUp / cameraDepth;
+            if (!Double.isFinite(sxDouble) || !Double.isFinite(syDouble)
+                || sxDouble < -30 || sxDouble > w + 30
+                || syDouble < 52 || syDouble > h - 42) continue;
+
+            int sx = (int)Math.round(sxDouble), sy = (int)Math.round(syDouble);
+            String label = marker.name() + " · " + Math.round(distance) + " м";
             int tw = mc.font.width(label);
-            g.fill(sx - tw / 2 - 5, sy - 16, sx + tw / 2 + 5, sy + 4, 0x990B111A);
-            waypointPin(g, mc, sx, sy - 24, marker, false);
-            g.drawCenteredString(mc.font, label, sx, sy - 12, 0xFFFFFFFF);
+            // Keep all parts of the marker at one projected world location.
+            g.fill(sx - tw / 2 - 5, sy + 12, sx + tw / 2 + 5, sy + 26, 0xB20B111A);
+            waypointPin(g, mc, sx, sy, marker, false);
+            g.drawCenteredString(mc.font, label, sx, sy + 15, 0xFFFFFFFF);
         }
     }
 
