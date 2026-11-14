@@ -199,25 +199,39 @@ final class RoundMapTextures {
         long started = System.nanoTime();
         int end = Math.min(build.texH, build.nextRow + maxRows);
         double worldBlocksPerTexel = build.drawW / (build.texW * build.zoom);
+        // Three quality bands:
+        // zoomed-out: single optimized tile color;
+        // medium: exact one-block shading with fog;
+        // close-up: actual 4x4 model-texture details sampled in client ticks.
+        boolean micro = image == FULL && !RoundMapClient.caveMode &&
+            RoundMapClient.fullPixelSize == 1 && build.zoom >= 2.0;
         for (int py = build.nextRow; py < end; py++) {
-            int wz = build.centerZ + (int)Math.floor(
-                (py + .5 - build.texH / 2.0) * worldBlocksPerTexel);
-            int lastX = Integer.MIN_VALUE, current = 0;
+            double fz = build.centerZ +
+                (py + .5 - build.texH / 2.0) * worldBlocksPerTexel;
+            int wz = (int)Math.floor(fz);
+            int subZ = micro ? Math.min(3, (int)((fz - wz) * 4.0)) : 0;
+            int rowKey = micro ? (wz * 4 + subZ) : wz;
+            int lastKey = Integer.MIN_VALUE, current = 0;
             for (int px = 0; px < build.texW; px++) {
-                if (wz == build.previousWorldZ) {
+                if (rowKey == build.previousWorldZ) {
                     current = build.lastRow[px];
                 } else {
-                    int wx = build.centerX + (int)Math.floor(
-                        (px + .5 - build.texW / 2.0) * worldBlocksPerTexel);
-                    if (wx != lastX) {
-                        current = colorForFullMap(wx, wz);
-                        lastX = wx;
+                    double fx = build.centerX +
+                        (px + .5 - build.texW / 2.0) * worldBlocksPerTexel;
+                    int wx = (int)Math.floor(fx);
+                    int subX = micro ? Math.min(3, (int)((fx - wx) * 4.0)) : 0;
+                    int key = micro ? wx * 4 + subX : wx;
+                    if (key != lastKey) {
+                        current = micro ?
+                            RoundMapFog.detailedColor(wx, wz, subX, subZ) :
+                            colorForFullMap(wx, wz);
+                        lastKey = key;
                     }
                     build.lastRow[px] = current;
                 }
                 image.pixels.setPixel(px, py, current);
             }
-            build.previousWorldZ = wz;
+            build.previousWorldZ = rowKey;
             build.nextRow = py + 1;
             if (System.nanoTime() - started >= budgetNanos) break;
         }
@@ -274,8 +288,8 @@ final class RoundMapTextures {
 
         // Higher than alpha.11's 1024px texture: preserve more ground,
         // coastline and contour detail at typical GUI resolutions.
-        int tw = Math.min(1536, Math.max(128, drawW));
-        int th = Math.min(1536, Math.max(128,
+        int tw = Math.min(2048, Math.max(128, drawW));
+        int th = Math.min(2048, Math.max(128,
             (int)Math.round(tw * drawH / (double)drawW)));
         FULL.allocate(tw, th);
         int pw = Math.min(400, Math.max(128, drawW));
