@@ -227,7 +227,6 @@ final class RoundMapAtlas {
                         int[] colors = new int[256];
                         for (int p = 0; p < 256; p++) colors[p] = in.readInt();
                         short[] heights = null;
-                        short[] heights = null;
                         if (version == MAGIC || version == OLD_MAGIC
                             || version == PREVIEW_MAGIC) {
                             heights = new short[256];
