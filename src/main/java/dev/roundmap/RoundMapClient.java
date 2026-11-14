@@ -769,7 +769,9 @@ public final class RoundMapClient implements ClientModInitializer {
         }
         private void zoom(double steps, double mouseX, double mouseY) {
             if (steps == 0) return;
-            targetZoom = Math.max(0.65, Math.min(16.0,
+            // Tenfold farther zoom-out than before. At 0.1 px/block one
+            // screen pixel represents ten world blocks.
+            targetZoom = Math.max(0.10, Math.min(16.0,
                 targetZoom * Math.pow(1.27, steps)));
             mapZoom = Math.max(1, Math.min(10, (int)Math.round(targetZoom)));
             zoomAnchorX = mouseX - width / 2.0;
