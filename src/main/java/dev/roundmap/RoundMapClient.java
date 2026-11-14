@@ -56,6 +56,9 @@ public final class RoundMapClient implements ClientModInitializer {
     private static long biomeRefreshAt;
     static int miniOpacity = 100;
     static boolean caveMode;
+    static boolean caveScreenActive() {
+        return caveMode && Minecraft.getInstance().screen instanceof MapScreen;
+    }
     private static final int[] ARROW_COLORS = {0xFFFF4848, 0xFF4BC9FF, 0xFFFFD54D, 0xFFFFFFFF};
     private static final String[] ARROW_COLOR_NAMES = {"Красный", "Голубой", "Жёлтый", "Белый"};
     private static int arrowColorIndex = 0;
