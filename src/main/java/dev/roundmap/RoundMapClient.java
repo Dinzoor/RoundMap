@@ -62,6 +62,8 @@ public final class RoundMapClient implements ClientModInitializer {
     // independent of the intentionally pixelated HUD minimap.
     static int fullPixelSize = 1;
     static boolean ultraTextureDetail = true;
+    // Fullscreen only: distinguish walls from sunken maze corridors.
+    static boolean wallContours = true;
     static boolean caveMode;
     static boolean caveScreenActive() {
         return caveMode && Minecraft.getInstance().screen instanceof MapScreen;
@@ -101,6 +103,8 @@ public final class RoundMapClient implements ClientModInitializer {
                 Integer.parseInt(p.getProperty("fullPixelSize", "1"))));
             ultraTextureDetail = Boolean.parseBoolean(
                 p.getProperty("ultraTextureDetail", "true"));
+            wallContours = Boolean.parseBoolean(
+                p.getProperty("wallContours", "true"));
             showMini = Boolean.parseBoolean(p.getProperty("visible", "true"));
             showCoords = Boolean.parseBoolean(p.getProperty("coords", "true"));
             showBiome = Boolean.parseBoolean(p.getProperty("biome", "true"));
@@ -146,6 +150,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("pixelSize", Integer.toString(mapPixelSize));
         p.setProperty("fullPixelSize", Integer.toString(fullPixelSize));
         p.setProperty("ultraTextureDetail", Boolean.toString(ultraTextureDetail));
+        p.setProperty("wallContours", Boolean.toString(wallContours));
         p.setProperty("zoom", Double.toString(miniZoom));
         p.setProperty("miniZoomUnits", "pixels_per_block");
         p.setProperty("visible", Boolean.toString(showMini));
@@ -1122,6 +1127,13 @@ public final class RoundMapClient implements ClientModInitializer {
                 option(right, top + step, cw, "Контуры высот: " + (RoundMapAtlas.contours ? "Вкл" : "Выкл"),
                     () -> { RoundMapAtlas.contours = !RoundMapAtlas.contours;
                         RoundMapTextures.invalidate(); savePosition(); });
+                option(left, top + step * 2, cw,
+                    "Границы стен: " + (wallContours ? "Чёткие" : "Выкл"),
+                    () -> {
+                        wallContours = !wallContours;
+                        RoundMapTextures.invalidate();
+                        savePosition();
+                    });
             } else if (tab == 3) {
                 option(left, top, cw, "Названия: " + (showLabels ? "Вкл" : "Выкл"),
                     () -> { showLabels = !showLabels; savePosition(); });
