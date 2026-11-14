@@ -55,6 +55,7 @@ public final class RoundMapClient implements ClientModInitializer {
     private static String biomeLabel = "";
     private static long biomeRefreshAt;
     static int miniOpacity = 100;
+    static boolean caveMode;
     private static final int[] ARROW_COLORS = {0xFFFF4848, 0xFF4BC9FF, 0xFFFFD54D, 0xFFFFFFFF};
     private static final String[] ARROW_COLOR_NAMES = {"Красный", "Голубой", "Жёлтый", "Белый"};
     private static int arrowColorIndex = 0;
@@ -369,6 +370,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 }
             });
             RoundMapAtlas.tick(client);
+            RoundMapCaveAtlas.tick(client);
             if (client.player == null || client.level == null || client.screen != null) return;
             if (mapKey.consumeClick()) client.setScreen(new MapScreen());
             else if (waypointKey.consumeClick()) client.setScreen(new NameScreen(client.player.getBlockX(), client.player.getBlockZ(), client.level.dimension().toString()));
@@ -379,7 +381,10 @@ public final class RoundMapClient implements ClientModInitializer {
             else if (zoomOutKey.consumeClick()) { miniZoom = Math.max(1.0, miniZoom - 0.5); savePosition(); }
         });
         loadPosition();
-        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> RoundMapAtlas.shutdown());
+        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+            RoundMapAtlas.shutdown();
+            RoundMapCaveAtlas.shutdown();
+        });
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
             if (screen instanceof net.minecraft.client.gui.screens.options.OptionsScreen) {
                 Screens.getButtons(screen).add(Button.builder(Component.literal("RoundMap settings"),
@@ -607,6 +612,18 @@ public final class RoundMapClient implements ClientModInitializer {
         }
         @Override protected void init() {
             int y = 8;
+            addRenderableWidget(Button.builder(Component.literal(
+                caveMode ? "Поверхность" : "• Поверхность"), b -> {
+                caveMode = false;
+                RoundMapTextures.invalidate();
+                rebuild();
+            }).bounds(6, y, 99, 20).build());
+            addRenderableWidget(Button.builder(Component.literal(
+                caveMode ? "• Пещеры" : "Пещеры"), b -> {
+                caveMode = true;
+                RoundMapTextures.invalidate();
+                rebuild();
+            }).bounds(109, y, 81, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Карты"), b ->
                 minecraft.setScreen(new MapLibraryScreen(this)))
                 .bounds(width - 322, y, 101, 20).build());
@@ -683,9 +700,12 @@ public final class RoundMapClient implements ClientModInitializer {
                 playerZ >= 47 && playerZ < height - 37)
                 playerArrow(g, mc, playerX, playerZ);
             g.fill(0, 0, width, 35, 0xB018222C);
-            g.drawString(font, "RoundMap  •  Чанков: " + RoundMapAtlas.exploredChunks()
-                + "  •  Подробно: " + RoundMapAtlas.detailedChunks(),
-                10, 12, 0xFFFFFFFF);
+            String count = caveMode
+                ? "Пещеры • слой Y " + (RoundMapCaveAtlas.band() * 16) +
+                  "  •  чанков: " + RoundMapCaveAtlas.chunks()
+                : "Поверхность • чанков: " + RoundMapAtlas.exploredChunks() +
+                  "  •  подробно: " + RoundMapAtlas.detailedChunks();
+            g.drawString(font, count, 197, 12, 0xFFFFFFFF);
             g.fill(0, height - 25, width, height, 0xB018222C);
             int hoveredX = (int)Math.round(targetX + (mouseX - cx) / (double)mapZoom);
             int hoveredZ = (int)Math.round(targetZ + (mouseY - cy) / (double)mapZoom);
