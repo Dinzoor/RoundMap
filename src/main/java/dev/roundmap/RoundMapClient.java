@@ -74,6 +74,12 @@ public final class RoundMapClient implements ClientModInitializer {
     private static int worldMarkerDistance = 1500;
     static boolean brightFog = true;
     private static int miniSize = 48, mapZoom = 5;
+    // 0 = no border, followed by five distinct pixel-art frames.
+    private static final String[] FRAME_STYLE_NAMES = {
+        "Без рамки", "Классическая", "Каменная",
+        "Неоновая", "Золотая", "Техническая"
+    };
+    private static int frameStyle = 1;
     // Both maps default to five SCREEN pixels for one Minecraft block.
     // miniZoom is pixels-per-world-block (independent of circle radius).
     private static double miniZoom = 5.0;
@@ -97,6 +103,9 @@ public final class RoundMapClient implements ClientModInitializer {
             if (!Double.isFinite(miniZoom)) miniZoom = 5.0;
             miniZoom = Math.max(1.0, Math.min(10.0, miniZoom));
             miniSize = Math.max(24, Math.min(120, miniSize));
+            frameStyle = Math.floorMod(
+                Integer.parseInt(p.getProperty("frameStyle", "1")),
+                FRAME_STYLE_NAMES.length);
             mapPixelSize = oldZoomFormat ? 1 : Math.max(1, Math.min(4,
                 Integer.parseInt(p.getProperty("pixelSize", "1"))));
             fullPixelSize = Math.max(1, Math.min(4,
@@ -147,6 +156,7 @@ public final class RoundMapClient implements ClientModInitializer {
         p.setProperty("x", Double.toString(miniX));
         p.setProperty("y", Double.toString(miniY));
         p.setProperty("size", Integer.toString(miniSize));
+        p.setProperty("frameStyle", Integer.toString(frameStyle));
         p.setProperty("pixelSize", Integer.toString(mapPixelSize));
         p.setProperty("fullPixelSize", Integer.toString(fullPixelSize));
         p.setProperty("ultraTextureDetail", Boolean.toString(ultraTextureDetail));
@@ -582,7 +592,7 @@ public final class RoundMapClient implements ClientModInitializer {
         updateMiniCamera(mc);
         RoundMapTextures.minimap(g, cx, cy, miniSize, miniZoom,
             miniViewX, miniViewZ);
-        outline(g, cx, cy, miniSize);
+        RoundMapTextures.drawFrame(g, cx, cy, miniSize, frameStyle);
         RoundMapRadar.draw(g, mc, cx, cy, miniViewX, miniViewZ,
             (float)miniZoom, miniSize, miniSize, true);
         drawMiniWaypoints(g, mc, cx, cy);
@@ -1050,6 +1060,8 @@ public final class RoundMapClient implements ClientModInitializer {
         private static final String[] TABS = {"Мини-карта", "Радар", "Оверлеи", "Точки", "Вид"};
         private final Screen parent;
         private final int tab;
+        private Button frameButton;
+        private boolean frameRightWasDown;
         private OptionsScreen() { this(null, 0); }
         private OptionsScreen(Screen parent) { this(parent, 0); }
         private OptionsScreen(Screen parent, int tab) {
@@ -1064,6 +1076,16 @@ public final class RoundMapClient implements ClientModInitializer {
                 refresh();
             }).bounds(x, y, w, 20).build());
         }
+        private static String frameStyleLabel() {
+            return "Рамка: " + FRAME_STYLE_NAMES[frameStyle];
+        }
+        private void cycleFrame(int direction) {
+            frameStyle = Math.floorMod(frameStyle + direction, FRAME_STYLE_NAMES.length);
+            savePosition();
+            if (frameButton != null)
+                frameButton.setMessage(Component.literal(frameStyleLabel()));
+        }
+
         private void link(int x, int y, int w, String label, Runnable action) {
             addRenderableWidget(Button.builder(Component.literal(label), b -> action.run())
                 .bounds(x, y, w, 20).build());
@@ -1100,6 +1122,11 @@ public final class RoundMapClient implements ClientModInitializer {
                     () -> { showBiome = !showBiome; savePosition(); });
                 link(right, top + 2 * step, cw, "Переместить мышью",
                     () -> minecraft.setScreen(new PositionScreen(new OptionsScreen(parent, tab))));
+                // Buttons normally activate only on left click. The right
+                // mouse button is detected below, over this SAME control.
+                frameButton = addRenderableWidget(Button.builder(
+                    Component.literal(frameStyleLabel()), b -> cycleFrame(-1))
+                    .bounds(left, top + 4 * step, cw, 20).build());
             } else if (tab == 1) {
                 option(left, top, cw, "На мини-карте: " + (RoundMapRadar.onMini ? "Вкл" : "Выкл"),
                     () -> { RoundMapRadar.onMini = !RoundMapRadar.onMini; savePosition(); });
@@ -1200,6 +1227,19 @@ public final class RoundMapClient implements ClientModInitializer {
         @Override public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
             g.fill(0, 0, width, height, 0xC0161C29);
             super.render(g, mouseX, mouseY, delta);
+            // LMB = previous style, RMB = next style. Poll only the dedicated
+            // frame control, with edge detection so holding RMB cycles once.
+            if (tab == 0 && frameButton != null) {
+                boolean rightDown = GLFW.glfwGetMouseButton(
+                    minecraft.getWindow().handle(), GLFW.GLFW_MOUSE_BUTTON_RIGHT)
+                    == GLFW.GLFW_PRESS;
+                if (rightDown && !frameRightWasDown &&
+                    frameButton.isMouseOver(mouseX, mouseY))
+                    cycleFrame(1);
+                frameRightWasDown = rightDown;
+                g.drawCenteredString(font, "ЛКМ: предыдущая  •  ПКМ: следующая",
+                    width / 2, 171, 0xFFCCCCCC);
+            }
             if (tab == 2)
                 g.drawCenteredString(font, "Белым или тёмным цветом скрыты неизученные участки",
                     width / 2, height / 2, 0xFFCCCCCC);
@@ -1394,7 +1434,7 @@ public final class RoundMapClient implements ClientModInitializer {
                 drawMini(g, minecraft, centerPx, centerPy);
             else {
                 g.fill(centerPx - miniSize, centerPy - miniSize, centerPx + miniSize, centerPy + miniSize, 0xFF425F77);
-                outline(g, centerPx, centerPy, miniSize);
+                RoundMapTextures.drawFrame(g, centerPx, centerPy, miniSize, frameStyle);
             }
             g.drawCenteredString(font, "Drag the round minimap with left mouse button", width / 2, 15, -1);
             g.drawCenteredString(font, "Save keeps the position after restarting Minecraft", width / 2, 29, 0xFFBBBBBB);
