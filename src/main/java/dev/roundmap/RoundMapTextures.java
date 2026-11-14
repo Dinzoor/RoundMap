@@ -204,6 +204,7 @@ final class RoundMapTextures {
         // medium: exact one-block shading with fog;
         // close-up: actual 4x4 model-texture details sampled in client ticks.
         boolean micro = image == FULL && !RoundMapClient.caveMode &&
+            RoundMapClient.ultraTextureDetail &&
             RoundMapClient.fullPixelSize == 1 && build.zoom >= 2.0;
         for (int py = build.nextRow; py < end; py++) {
             double fz = build.centerZ +
