@@ -170,7 +170,7 @@ final class RoundMapTextures {
         int wz = Math.floorDiv(worldZ, step) * step;
         return RoundMapClient.caveMode
             ? RoundMapCaveAtlas.renderColor(wx, wz)
-            : RoundMapFog.color(wx, wz);
+            : RoundMapFog.fullMapColor(wx, wz);
     }
 
     private static double bakedZoom(Image image) {
