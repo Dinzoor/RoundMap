@@ -1,10 +1,11 @@
-# RoundMap — Fabric Minecraft 1.21.11 (0.2.0-alpha.23)
+# RoundMap — Fabric Minecraft 1.21.11 (0.2.0-alpha.24)
 
 RoundMap is an experimental client-side world map for Minecraft Java 1.21.11 and Fabric. Source, interface and map graphics are original to RoundMap; Diorama was reviewed as a feature reference.
 
 ## Map and minimap
 
 - Circular, movable HUD minimap: freely position it with the mouse in the editor. Adjust size, terrain zoom, opacity, compass, coordinates and biome.
+- Pixel-art minimap frames (alpha.24): **6 styles** (no frame, Classic, Stone, Neon, Gold, Technical). In **Настройки → Мини-карта**, use **LMB for previous / RMB for next** on the style button; the selection is saved in `roundmap-position.properties`. A small style preview is shown when screen space allows.
 - Fullscreen map: `M` by default, smooth left-button drag, wheel zoom, recenter button, surface/cave map tabs, cursor coordinates and distance.
 - Surface map: incremental scanning of already loaded chunks, world/dimension-specific persistent explorer atlas and soft fog of war. Terrain model texture sampling includes active server resource packs when compatible.
 - Caves (alpha): a **separate** cached and persisted 2D map of cave floors near the player's vertical 16-block layer. Does not reveal unseen/unloaded chunks. Cave mode currently has less detail than Diorama.
@@ -37,7 +38,7 @@ RoundMap is an experimental client-side world map for Minecraft Java 1.21.11 and
 
 The persistent surface atlas scans in three stages: one fast preview per chunk, a medium 4×4 sample grid, and finally one sample **per block**. The fullscreen renderer chooses an adaptive level of detail: overview colors when far away, block colors at medium zoom, and **4×4 actual model-texture subpixels within individual blocks** at zoom ≥2, where those textures are available.
 
-The optional high-zoom texture cache is populated only by bounded client-tick scanning close to the player. It is an in-memory LRU capped at 256 chunks (about 4 MiB), **not persisted to disk**; the normal one-color-per-block atlas is saved as before. The map never asks for unloaded chunks and does not reveal undiscovered terrain. Fullscreen images use a fast 400px preview followed by a capped 2048px detailed GPU texture, built incrementally rather than in one expensive frame. The small HUD minimap still uses a separate 96px texture to protect FPS.
+The optional high-zoom texture cache is populated only by bounded client-tick scanning close to the player. It is an in-memory LRU capped at 256 chunks (about 4 MiB), **not persisted to disk**; the normal one-color-per-block atlas is saved as before. The map never asks for unloaded chunks and does not reveal undiscovered terrain. Fullscreen images use a fast 400px preview followed by a capped 2048px detailed GPU texture, built incrementally rather than in one expensive frame. The HUD minimap has its own dynamically sized texture: **one texture pixel per on-screen GUI pixel** (72/96/120px for the three common radii), avoiding avoidable resampling blur. Its pixel-art border is cached as a single separate GPU quad and regenerated only when style or size changes. The fullscreen map now rebuilds close to the precise zoom value after wheel animations, using relative rather than absolute thresholds at low zoom to maintain clarity when zooming far out.
 
 **Settings → Вид:** "Качество: Детально" for per-block scanning; "Детализация большой карты: Максимальная" for one full-map cell per block; "Текстуры внутри блока: 4×4" for high-zoom details (turn off for performance). "Сканирование" controls the sample cap (32/64/128/256), with an independent ~4ms scan-time limit. Behavior and FPS on Iris/Sodium and server resource packs still need in-game verification.
 
